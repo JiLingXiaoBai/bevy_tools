@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_gameplay_tags::*;
+use bevy_tools::*;
 
 fn main() {
     App::new()
