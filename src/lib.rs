@@ -1,5 +1,6 @@
 mod gameplay_tags;
 mod unique_name;
+mod attribute;
 
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
