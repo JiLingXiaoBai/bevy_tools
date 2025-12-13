@@ -18,7 +18,7 @@ pub fn tag_bits_from_tags(tags: &[GameplayTag]) -> GameplayTagBits {
 pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) {
     let tag_bit_index = tag.get_bit_index_usize();
     if tag_bit_index >= MAX_TAG_COUNTS {
-        return;
+        panic!("Exceeded MAX_TAG_COUNTS");
     }
     let block = tag_bit_index >> BLOCK_SIZE_EXPONENT;
     let bit = tag_bit_index & (TAG_BITS_PER_BLOCK - 1);
@@ -136,7 +136,7 @@ impl GameplayTagContainer {
     pub fn has_tag(&self, tag: &GameplayTag) -> bool {
         let tag_bit_index = tag.get_bit_index_usize();
         if tag_bit_index >= MAX_TAG_COUNTS {
-            return false;
+            panic!("Exceeded MAX_TAG_COUNTS");
         };
         let block = tag_bit_index >> BLOCK_SIZE_EXPONENT;
         let bit = tag_bit_index & (TAG_BITS_PER_BLOCK - 1);

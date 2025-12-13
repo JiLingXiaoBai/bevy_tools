@@ -12,6 +12,9 @@ pub struct AttributeSet {
 impl AttributeSet {
     pub fn initialize_attribute(&mut self, id: AttributeId, base_value: f64, clamp_min: Option<f64>, clamp_max: Option<f64>) {
         let index = id.to_index();
+        if index >= ATTRIBUTE_SET_SIZE {
+            panic!("Exceeded ATTRIBUTE_SET_SIZE")
+        }
         let attr = &mut self.attributes[index];
         attr.init(base_value, clamp_min, clamp_max);
     }
