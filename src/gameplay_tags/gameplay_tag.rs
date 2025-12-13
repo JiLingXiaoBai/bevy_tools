@@ -1,16 +1,30 @@
-﻿use super::gameplay_tag_manager::GameplayTagManager;
+﻿use super::*;
 use crate::unique_name::UniqueNamePool;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::ResMut;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GameplayTag {
-    pub tag_bit_index: u16,
+    tag_bit_index: u16,
 }
+
+impl GameplayTag {
+    pub fn new(tag_bit_index: u16) -> Self {
+        Self { tag_bit_index }
+    }
+    pub fn get_bit_index_u16(&self) -> u16 {
+        self.tag_bit_index
+    }
+
+    pub fn get_bit_index_usize(&self) -> usize {
+        self.tag_bit_index as usize
+    }
+}
+
 #[derive(SystemParam)]
 pub struct GameplayTagRegister<'w> {
-    pub unique_name_pool: ResMut<'w, UniqueNamePool>,
-    pub gameplay_tag_manager: ResMut<'w, GameplayTagManager>,
+    unique_name_pool: ResMut<'w, UniqueNamePool>,
+    gameplay_tag_manager: ResMut<'w, GameplayTagManager>,
 }
 
 impl<'w> GameplayTagRegister<'w> {

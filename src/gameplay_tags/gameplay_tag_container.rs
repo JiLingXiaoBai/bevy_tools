@@ -1,5 +1,4 @@
-use super::gameplay_tag::GameplayTag;
-use super::gameplay_tag_manager::{GameplayTagManager, MAX_TAG_COUNTS};
+use super::*;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
@@ -17,22 +16,23 @@ pub fn tag_bits_from_tags(tags: &[GameplayTag]) -> GameplayTagBits {
 }
 
 pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) {
-    if tag.tag_bit_index as usize >= MAX_TAG_COUNTS {
+    let tag_bit_index = tag.get_bit_index_usize();
+    if tag_bit_index >= MAX_TAG_COUNTS {
         return;
     }
-    let block = tag.tag_bit_index as usize >> BLOCK_SIZE_EXPONENT;
-    let bit = tag.tag_bit_index as usize & (TAG_BITS_PER_BLOCK - 1);
+    let block = tag_bit_index >> BLOCK_SIZE_EXPONENT;
+    let bit = tag_bit_index & (TAG_BITS_PER_BLOCK - 1);
     bits[block] |= 1u64 << bit;
 }
 
 #[derive(Component, Clone)]
 pub struct GameplayTagContainer {
     /// The bitset representing which tags are currently active (including parents).
-    pub tag_bits: GameplayTagBits,
+    tag_bits: GameplayTagBits,
     /// Reference count for each explicit tag index present in the container.
     /// Key: tag_bit_index (u16), Value: count (u16).
     /// Only tags with a count > 0 are stored.
-    pub ref_counts: HashMap<u16, u16>,
+    ref_counts: HashMap<u16, u16>,
 }
 
 impl GameplayTagContainer {
@@ -69,12 +69,13 @@ impl GameplayTagContainer {
     /// Removes a tag, decrementing reference counts. Clears the bit only if the count drops to zero.
     pub fn remove_tag(&mut self, tag: &GameplayTag, manager: &Res<GameplayTagManager>) {
         // Only proceed if the tag was explicitly present (count > 0 for this exact tag)
+        let tag_bit_index = tag.get_bit_index_u16();
         if self
             .ref_counts
-            .get(&tag.tag_bit_index)
+            .get(&tag_bit_index)
             .map_or(false, |&c| c > 0)
         {
-            if manager.check_has_active_descendants(tag.tag_bit_index, &self.ref_counts) {
+            if manager.check_has_active_descendants(tag_bit_index, &self.ref_counts) {
                 return;
             }
 
@@ -133,11 +134,12 @@ impl GameplayTagContainer {
     }
 
     pub fn has_tag(&self, tag: &GameplayTag) -> bool {
-        if tag.tag_bit_index as usize >= MAX_TAG_COUNTS {
+        let tag_bit_index = tag.get_bit_index_usize();
+        if tag_bit_index >= MAX_TAG_COUNTS {
             return false;
         };
-        let block = tag.tag_bit_index as usize >> BLOCK_SIZE_EXPONENT;
-        let bit = tag.tag_bit_index as usize & (TAG_BITS_PER_BLOCK - 1);
+        let block = tag_bit_index >> BLOCK_SIZE_EXPONENT;
+        let bit = tag_bit_index & (TAG_BITS_PER_BLOCK - 1);
         (self.tag_bits[block] & (1u64 << bit)) != 0
     }
     pub fn has_all(&self, tags: &[GameplayTag]) -> bool {

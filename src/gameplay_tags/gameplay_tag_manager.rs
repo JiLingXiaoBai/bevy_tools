@@ -1,15 +1,15 @@
-use super::gameplay_tag::GameplayTag;
-use super::gameplay_tag_container::{GameplayTagBits, add_bit_with_tag};
+use super::*;
 use crate::unique_name::UniqueName;
+use crate::settings::GameplayAbilitySystemSettings;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-pub const MAX_TAG_COUNTS: usize = 512;
+pub const MAX_TAG_COUNTS: usize = GameplayAbilitySystemSettings::GAMEPLAY_TAG_SIZE;
 #[derive(Resource)]
 pub struct GameplayTagManager {
-    pub tag_name_to_index: HashMap<UniqueName, u16>,
-    pub tag_parent_index: Vec<Option<u16>>,
-    pub tag_children: Vec<Vec<u16>>,
-    pub tag_inherited_bits: Vec<GameplayTagBits>,
+    tag_name_to_index: HashMap<UniqueName, u16>,
+    tag_parent_index: Vec<Option<u16>>,
+    tag_children: Vec<Vec<u16>>,
+    tag_inherited_bits: Vec<GameplayTagBits>,
     next_tag_index: u16,
 }
 
@@ -29,9 +29,7 @@ impl GameplayTagManager {
     pub fn get_tag(&self, unique_name: UniqueName) -> Option<GameplayTag> {
         self.tag_name_to_index
             .get(&unique_name)
-            .map(|&index| GameplayTag {
-                tag_bit_index: index,
-            })
+            .map(|&index| GameplayTag::new(index))
     }
 
     pub fn register_tag_internal(
@@ -40,9 +38,7 @@ impl GameplayTagManager {
         parent_tag_index: Option<u16>,
     ) -> GameplayTag {
         if let Some(&index) = self.tag_name_to_index.get(&unique_name) {
-            return GameplayTag {
-                tag_bit_index: index,
-            };
+            return GameplayTag::new(index);
         }
 
         let new_index = self.next_tag_index;
@@ -56,9 +52,7 @@ impl GameplayTagManager {
             .unwrap_or_else(GameplayTagBits::default);
 
         // Set the current tag's own bit in the inherited bits
-        let self_tag = GameplayTag {
-            tag_bit_index: new_index,
-        };
+        let self_tag = GameplayTag::new(new_index);
         add_bit_with_tag(&mut inherited_bits, &self_tag);
 
         // Update the Manager data structures
@@ -78,7 +72,7 @@ impl GameplayTagManager {
     }
 
     pub fn get_inherited_bits(&self, tag: &GameplayTag) -> Option<&GameplayTagBits> {
-        self.tag_inherited_bits.get(tag.tag_bit_index as usize)
+        self.tag_inherited_bits.get(tag.get_bit_index_usize())
     }
     pub fn check_has_active_descendants(
         &self,

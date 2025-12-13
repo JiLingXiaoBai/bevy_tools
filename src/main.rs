@@ -13,21 +13,21 @@ fn register_initial_tags(mut register: GameplayTagRegister) {
 
     // 注册根标签
     let ability_tag = register.request_or_register_tag("Ability");
-    let effect_tag = register.request_or_register_tag("Effect");
-    let character_tag = register.request_or_register_tag("Character");
+    let _effect_tag = register.request_or_register_tag("Effect");
+    let _character_tag = register.request_or_register_tag("Character");
 
     // 注册子标签 (会自动注册其父标签)
-    let ability_fireball = register.request_or_register_tag("Ability.Fireball");
-    let ability_heal = register.request_or_register_tag("Ability.Heal");
+    let _ability_fireball = register.request_or_register_tag("Ability.Fireball");
+    let _ability_heal = register.request_or_register_tag("Ability.Heal");
 
     // 注册多级标签
     let effect_debuff_stun = register.request_or_register_tag("Effect.Debuff.Stun");
-    let effect_buff_speed = register.request_or_register_tag("Effect.Buff.Speed");
+    let _effect_buff_speed = register.request_or_register_tag("Effect.Buff.Speed");
 
     info!("标签注册完成。");
-    info!("Ability 索引: {}", ability_tag.tag_bit_index);
+    info!("Ability 索引: {}", ability_tag.get_bit_index_u16());
     info!(
         "Effect.Debuff.Stun 索引: {}",
-        effect_debuff_stun.tag_bit_index
+        effect_debuff_stun.get_bit_index_u16()
     );
 }
