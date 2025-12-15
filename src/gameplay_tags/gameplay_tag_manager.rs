@@ -1,6 +1,6 @@
 use super::*;
-use crate::unique_name::UniqueName;
 use crate::settings::GameplayAbilitySystemSettings;
+use crate::unique_name::UniqueName;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 pub const MAX_TAG_COUNTS: usize = GameplayAbilitySystemSettings::GAMEPLAY_TAG_SIZE;
@@ -11,6 +11,8 @@ pub struct GameplayTagManager {
     tag_children: Vec<Vec<u16>>,
     tag_inherited_bits: Vec<GameplayTagBits>,
     next_tag_index: u16,
+    container_pool: Vec<GameplayTagContainer>,
+    pool_free_list: Vec<usize>,
 }
 
 impl Default for GameplayTagManager {
@@ -21,6 +23,8 @@ impl Default for GameplayTagManager {
             tag_children: Vec::new(),
             tag_inherited_bits: Vec::new(),
             next_tag_index: 0,
+            container_pool: Vec::new(),
+            pool_free_list: Vec::new(),
         }
     }
 }
@@ -98,5 +102,33 @@ impl GameplayTagManager {
             }
         }
         false
+    }
+
+    pub fn allocate_container(&mut self) -> usize {
+        if let Some(index) = self.pool_free_list.pop() {
+            self.container_pool[index] = GameplayTagContainer::new();
+            index
+        } else {
+            let index = self.container_pool.len();
+            self.container_pool.push(GameplayTagContainer::new());
+            index
+        }
+    }
+
+    pub fn free_container(&mut self, index: usize) {
+        self.pool_free_list.push(index);
+    }
+}
+
+#[derive(Clone)]
+pub struct GameplayTagContainer {
+    ref_counts: Box<[u16]>,
+}
+
+impl GameplayTagContainer {
+    pub fn new() -> Self {
+        Self {
+            ref_counts: Box::new([0; MAX_TAG_COUNTS]),
+        }
     }
 }
