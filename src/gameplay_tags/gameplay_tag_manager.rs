@@ -78,11 +78,7 @@ impl GameplayTagManager {
     pub fn get_inherited_bits(&self, tag: &GameplayTag) -> Option<&GameplayTagBits> {
         self.tag_inherited_bits.get(tag.get_bit_index_usize())
     }
-    pub fn check_has_active_descendants(
-        &self,
-        tag_index: u16,
-        ref_counts: &HashMap<u16, u16>,
-    ) -> bool {
+    pub fn check_has_active_descendants(&self, tag_index: u16, ref_counts: &Box<[u16]>) -> bool {
         let mut stack: Vec<u16> = Vec::new();
         if (tag_index as usize) < self.tag_children.len() {
             stack.extend(self.tag_children[tag_index as usize].iter().copied());
@@ -91,12 +87,13 @@ impl GameplayTagManager {
         }
 
         while let Some(current_index) = stack.pop() {
-            if ref_counts.get(&current_index).map_or(false, |&c| c > 0) {
+            let index_usize = current_index as usize;
+            if index_usize < ref_counts.len() && ref_counts[index_usize] > 0 {
                 return true;
             }
 
-            if (current_index as usize) < self.tag_children.len() {
-                if let Some(children) = self.tag_children.get(current_index as usize) {
+            if (index_usize) < self.tag_children.len() {
+                if let Some(children) = self.tag_children.get(index_usize) {
                     stack.extend(children.iter().copied());
                 }
             }
@@ -118,6 +115,29 @@ impl GameplayTagManager {
     pub fn free_container(&mut self, index: usize) {
         self.pool_free_list.push(index);
     }
+
+    pub fn get_ref_counts_mut(&mut self, index: usize) -> &mut Box<[u16]> {
+        if index < self.container_pool.len() {
+            self.container_pool[index].get_mut()
+        } else {
+            panic!(
+                "Invalid ref_count_index {} for len {:?}",
+                index,
+                self.container_pool.len()
+            );
+        }
+    }
+    pub fn get_ref_counts(&self, index: usize) -> &Box<[u16]> {
+        if index < self.container_pool.len() {
+            self.container_pool[index].get()
+        } else {
+            panic!(
+                "Invalid ref_count_index {} for len {:?}",
+                index,
+                self.container_pool.len()
+            );
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -130,5 +150,12 @@ impl GameplayTagContainer {
         Self {
             ref_counts: Box::new([0; MAX_TAG_COUNTS]),
         }
+    }
+    pub fn get_mut(&mut self) -> &mut Box<[u16]> {
+        &mut self.ref_counts
+    }
+
+    pub fn get(&self) -> &Box<[u16]> {
+        &self.ref_counts
     }
 }

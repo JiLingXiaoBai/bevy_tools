@@ -1,4 +1,4 @@
-pub struct GameplayAbilitySystemSettings();
+pub struct GameplayAbilitySystemSettings;
 
 impl GameplayAbilitySystemSettings {
     pub const ATTRIBUTE_SET_SIZE: usize = 256;
