@@ -1,5 +1,5 @@
 ﻿use super::*;
-use bevy::prelude::Component;
+use bevy::prelude::{Component, ResMut};
 
 pub const BLOCK_SIZE_EXPONENT: usize = 6; // 2^6 =64
 pub const TAG_BITS_PER_BLOCK: usize = 64;
@@ -39,7 +39,7 @@ impl GameplayTagComponent {
     //         for block_index in 0..MAX_TAG_BLOCKS {
     //             let base_index = (block_index * TAG_BITS_PER_BLOCK) as u16;
     //             let mut current_block = inherited_bits[block_index];
-    // 
+    //
     //             while current_block != 0 {
     //                 let bit_offset = current_block.trailing_zeros();
     //                 let current_index = base_index + bit_offset as u16;
@@ -48,7 +48,7 @@ impl GameplayTagComponent {
     //                 current_block &= !(1u64 << bit_offset);
     //             }
     //         }
-    // 
+    //
     //         // 2. Update Bitset (OR operation)
     //         for i in 0..MAX_TAG_BLOCKS {
     //             self.tag_bits[i] |= inherited_bits[i];
@@ -155,5 +155,9 @@ impl GameplayTagComponent {
 
     pub fn get_bit_set_mut(&mut self) -> &mut GameplayTagBits {
         &mut self.tag_bits
+    }
+
+    pub fn init(&mut self, mut container_pool: ResMut<GameplayTagContainerPool>){
+        self.container_index = container_pool.allocate_container();
     }
 }
