@@ -29,6 +29,7 @@ pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) {
 pub struct GameplayTagComponent {
     tag_bits: GameplayTagBits,
     container_index: usize,
+    container_generation: usize,
 }
 
 impl GameplayTagComponent {
@@ -152,12 +153,17 @@ impl GameplayTagComponent {
     pub fn get_container_index(&self) -> usize {
         self.container_index
     }
+    pub fn get_container_generation(&self) -> usize {
+        self.container_generation
+    }
 
     pub fn get_bit_set_mut(&mut self) -> &mut GameplayTagBits {
         &mut self.tag_bits
     }
 
-    pub fn init(&mut self, mut container_pool: ResMut<GameplayTagContainerPool>){
-        self.container_index = container_pool.allocate_container();
+    pub fn init(&mut self, mut container_pool: ResMut<GameplayTagContainerPool>) {
+        let (index, generation) = container_pool.allocate_container();
+        self.container_index = index;
+        self.container_generation = generation;
     }
 }

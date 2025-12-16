@@ -15,8 +15,9 @@ pub fn process_tag_operations(
     for operation in operations.read() {
         if let Ok(mut tag_comp) = components.get_mut(operation.entity) {
             let container_index = tag_comp.get_container_index();
+            let container_generation = tag_comp.get_container_generation();
             let tag_comp_bits = tag_comp.get_bit_set_mut();
-            let ref_counts = container_pool.get_ref_counts_mut(container_index);
+            let ref_counts = container_pool.get_ref_counts_mut(container_index, container_generation);
             for tag in &operation.tags_to_add {
                 if let Some(inherited_bits) = manager.get_inherited_bits(tag) {
                     for block_index in 0..MAX_TAG_BLOCKS {
