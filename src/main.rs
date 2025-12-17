@@ -25,9 +25,9 @@ fn register_initial_tags(mut register: GameplayTagRegister) {
     let _effect_buff_speed = register.request_or_register_tag("Effect.Buff.Speed");
 
     info!("标签注册完成。");
-    info!("Ability 索引: {}", ability_tag.get_bit_index_u16());
+    info!("Ability 索引: {}", ability_tag.get_bit_index_usize());
     info!(
         "Effect.Debuff.Stun 索引: {}",
-        effect_debuff_stun.get_bit_index_u16()
+        effect_debuff_stun.get_bit_index_usize()
     );
 }

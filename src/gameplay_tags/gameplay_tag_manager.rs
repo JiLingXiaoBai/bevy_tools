@@ -74,10 +74,10 @@ impl GameplayTagManager {
     pub fn get_inherited_bits(&self, tag: &GameplayTag) -> Option<&GameplayTagBits> {
         self.tag_inherited_bits.get(tag.get_bit_index_usize())
     }
-    pub fn check_has_active_descendants(&self, tag_index: u16, ref_counts: &Box<[u16]>) -> bool {
+    pub fn check_has_active_descendants(&self, tag_index: usize, ref_counts: &Box<[u16]>) -> bool {
         let mut stack: Vec<u16> = Vec::new();
-        if (tag_index as usize) < self.tag_children.len() {
-            stack.extend(self.tag_children[tag_index as usize].iter().copied());
+        if tag_index < self.tag_children.len() {
+            stack.extend(self.tag_children[tag_index].iter().copied());
         } else {
             return false;
         }
