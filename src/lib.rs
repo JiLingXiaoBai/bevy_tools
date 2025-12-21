@@ -1,14 +1,16 @@
-mod gameplay_tags;
-mod unique_name;
-mod attribute;
 mod settings;
+mod unique_name;
+mod gameplay_tags;
+mod attribute;
+mod modifier;
 
+pub use settings::*;
+pub use unique_name::*;
+pub use gameplay_tags::*;
+pub use attribute::*;
+pub use modifier::*;
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
-pub use settings::*;
-pub use gameplay_tags::*;
-pub use unique_name::*;
-pub use attribute::*;
 extern crate core;
 
 pub struct GameplayTagPlugin;

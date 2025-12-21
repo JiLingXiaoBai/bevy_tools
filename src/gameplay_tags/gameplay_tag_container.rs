@@ -27,12 +27,21 @@ pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) {
 }
 
 #[derive(Component)]
-pub struct GameplayTagComponent {
+pub struct GameplayTagContainer {
     tag_bits: GameplayTagBits,
     ref_counts: Box<[u16]>,
 }
 
-impl GameplayTagComponent {
+impl Default for GameplayTagContainer {
+    fn default() -> Self {
+        Self {
+            tag_bits: GameplayTagBits::default(),
+            ref_counts: Box::new([0; MAX_TAG_COUNTS]),
+        }
+    }
+}
+
+impl GameplayTagContainer {
     /// Adds a tag, incrementing reference counts for itself and all parents, and updating the Bitset.
     pub fn add_tag(&mut self, tag: &GameplayTag, manager: &Res<GameplayTagManager>) {
         if let Some(inherited_bits) = manager.get_inherited_bits(tag) {
@@ -46,7 +55,8 @@ impl GameplayTagComponent {
                     let current_index = base_index + bit_offset as u16;
                     let index_usize = current_index as usize;
                     if index_usize < self.ref_counts.len() {
-                        self.ref_counts[index_usize] = self.ref_counts[index_usize].saturating_add(1);
+                        self.ref_counts[index_usize] =
+                            self.ref_counts[index_usize].saturating_add(1);
                     }
                     current_block &= !(1u64 << bit_offset);
                 }
@@ -62,8 +72,7 @@ impl GameplayTagComponent {
     pub fn remove_tag(&mut self, tag: &GameplayTag, manager: &Res<GameplayTagManager>) {
         // Only proceed if the tag was explicitly present (count > 0 for this exact tag)
         let tag_bit_index = tag.get_bit_index_usize();
-        if tag_bit_index < self.ref_counts.len() && self.ref_counts[tag_bit_index] > 0
-        {
+        if tag_bit_index < self.ref_counts.len() && self.ref_counts[tag_bit_index] > 0 {
             if manager.check_has_active_descendants(tag_bit_index, &self.ref_counts) {
                 return;
             }
@@ -80,8 +89,9 @@ impl GameplayTagComponent {
                         let bit_offset = current_block.trailing_zeros();
                         let current_index = (base_index as u32 + bit_offset) as usize;
                         if current_index < self.ref_counts.len() {
-                            self.ref_counts[current_index] = self.ref_counts[current_index].saturating_sub(1);
-                            if self.ref_counts[current_index] == 0  {
+                            self.ref_counts[current_index] =
+                                self.ref_counts[current_index].saturating_sub(1);
+                            if self.ref_counts[current_index] == 0 {
                                 // mark this bit should be reset int Bitset
                                 let block = current_index >> BLOCK_SIZE_EXPONENT;
                                 let bit = current_index & (TAG_BITS_PER_BLOCK - 1);
