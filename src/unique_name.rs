@@ -9,12 +9,10 @@ fn compute_hash(input: &str) -> u64 {
     hasher.finish()
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct UniqueName {
-    index: u32,
-}
+pub struct UniqueName(u32);
 impl fmt::Debug for UniqueName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UniqueName({})", self.index)
+        write!(f, "UniqueName({})", self.0)
     }
 }
 
@@ -70,13 +68,13 @@ impl UniqueNamePool {
 
     pub fn new_name(&mut self, name: &str) -> UniqueName {
         UniqueName {
-            index: self.get_or_insert(name),
+            0: self.get_or_insert(name),
         }
     }
 
     pub fn get_display_str(&self, name: &UniqueName) -> &str {
         self.entry_pool
-            .get(name.index as usize)
+            .get(name.0 as usize)
             .map(|s| s.as_str())
             .unwrap_or("")
     }

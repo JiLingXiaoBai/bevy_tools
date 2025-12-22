@@ -1,4 +1,4 @@
-use super::super::attribute::{AttributeId, AttributeSet};
+use crate::attribute::{AttributeId, AttributeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModifierOperation {

@@ -4,20 +4,18 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::ResMut;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GameplayTag {
-    tag_bit_index: u16,
-}
+pub struct GameplayTag(u16);
 
 impl GameplayTag {
     pub fn new(tag_bit_index: u16) -> Self {
-        Self { tag_bit_index }
+        Self(tag_bit_index)
     }
     pub fn get_bit_index_u16(&self) -> u16 {
-        self.tag_bit_index
+        self.0
     }
 
     pub fn get_bit_index_usize(&self) -> usize {
-        self.tag_bit_index as usize
+        self.0 as usize
     }
 }
 
@@ -42,7 +40,7 @@ impl<'w> GameplayTagRegister<'w> {
                 // *** RECURSIVE CALL ***
                 // Ensure the parent is registered before proceeding
                 let parent_tag = self.request_or_register_tag(parent_name);
-                parent_tag.tag_bit_index
+                parent_tag.0
             });
 
         self.gameplay_tag_manager
