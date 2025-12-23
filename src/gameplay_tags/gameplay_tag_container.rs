@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use bevy::prelude::{Component, Res};
 use bevy::render::render_resource::encase::private::RuntimeSizedArray;
 

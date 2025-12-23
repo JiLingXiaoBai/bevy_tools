@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::settings::GameplayAbilitySystemSettings;
 use bevy::prelude::*;
 

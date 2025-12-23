@@ -1,4 +1,4 @@
-﻿use bevy::platform::collections::HashMap;
+use bevy::platform::collections::HashMap;
 use bevy::platform::hash::FixedHasher;
 use bevy::prelude::*;
 use core::fmt;

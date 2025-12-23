@@ -1,4 +1,4 @@
-﻿#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Attribute {
     base: f64,
     current: f64,

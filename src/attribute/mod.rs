@@ -1,4 +1,4 @@
-﻿mod attribute;
+mod attribute;
 mod attribute_set;
 mod attribute_id_manager;
 
