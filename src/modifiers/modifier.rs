@@ -1,4 +1,4 @@
-use crate::attribute::{AttributeId, AttributeSet};
+use crate::attributes::AttributeId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModifierOperation {
@@ -8,12 +8,12 @@ pub enum ModifierOperation {
     Override,
 }
 
-pub enum ModifierMagnitude{
+pub enum ModifierMagnitude {
     Flat(f64),
-    Calculated(Box<dyn ModifierMagnitudeCalculation>)
+    Calculated(Box<dyn ModifierMagnitudeCalculation>),
 }
 
-pub trait ModifierMagnitudeCalculation: Send + Sync{
+pub trait ModifierMagnitudeCalculation: Send + Sync {
     // fn calculate(&self, source: &AttributeSet, target: &AttributeSet) -> f64;
 }
 

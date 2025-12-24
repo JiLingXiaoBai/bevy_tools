@@ -4,7 +4,7 @@ use bevy::render::render_resource::encase::private::RuntimeSizedArray;
 
 pub const BLOCK_SIZE_EXPONENT: usize = 6; // 2^6 =64
 pub const TAG_BITS_PER_BLOCK: usize = 64;
-pub const MAX_TAG_BLOCKS: usize = (MAX_TAG_COUNTS + TAG_BITS_PER_BLOCK - 1) / TAG_BITS_PER_BLOCK;
+pub const MAX_TAG_BLOCKS: usize = MAX_TAG_COUNTS.div_ceil(TAG_BITS_PER_BLOCK);
 
 pub type GameplayTagBits = [u64; MAX_TAG_BLOCKS];
 
@@ -46,9 +46,9 @@ impl GameplayTagContainer {
     pub fn add_tag(&mut self, tag: &GameplayTag, manager: &Res<GameplayTagManager>) {
         if let Some(inherited_bits) = manager.get_inherited_bits(tag) {
             // 1. Update Reference Counts (for self and all parents)
-            for block_index in 0..MAX_TAG_BLOCKS {
+            for (block_index, &block_bits) in inherited_bits.iter().enumerate() {
                 let base_index = (block_index * TAG_BITS_PER_BLOCK) as u16;
-                let mut current_block = inherited_bits[block_index];
+                let mut current_block = block_bits;
 
                 while current_block != 0 {
                     let bit_offset = current_block.trailing_zeros();
@@ -63,8 +63,8 @@ impl GameplayTagContainer {
             }
 
             // 2. Update Bitset (OR operation)
-            for i in 0..MAX_TAG_BLOCKS {
-                self.tag_bits[i] |= inherited_bits[i];
+            for (dst, src) in self.tag_bits.iter_mut().zip(inherited_bits.iter()) {
+                *dst |= *src;
             }
         }
     }
@@ -80,10 +80,9 @@ impl GameplayTagContainer {
             if let Some(inherited_bits) = manager.get_inherited_bits(tag) {
                 // 1. Update Reference Counts and track which bits need to be cleared
                 let mut bits_to_clear = [0u64; MAX_TAG_BLOCKS];
-
-                for block_index in 0..MAX_TAG_BLOCKS {
+                for (block_index, &block_bits) in inherited_bits.iter().enumerate() {
                     let base_index = (block_index * TAG_BITS_PER_BLOCK) as u16;
-                    let mut current_block = inherited_bits[block_index];
+                    let mut current_block = block_bits;
 
                     while current_block != 0 {
                         let bit_offset = current_block.trailing_zeros();
@@ -103,8 +102,8 @@ impl GameplayTagContainer {
                 }
 
                 // 2. Update Bitset (AND NOT operation based on zero counts)
-                for i in 0..MAX_TAG_BLOCKS {
-                    self.tag_bits[i] &= !bits_to_clear[i];
+                for (dst, clear) in &mut self.tag_bits.iter_mut().zip(bits_to_clear) {
+                    *dst &= !clear;
                 }
             }
         }
@@ -132,20 +131,16 @@ impl GameplayTagContainer {
     }
     pub fn has_all(&self, tags: &[GameplayTag]) -> bool {
         let tag_bits = tag_bits_from_tags(tags);
-        for i in 0..MAX_TAG_BLOCKS {
-            if (self.tag_bits[i] & tag_bits[i]) != tag_bits[i] {
-                return false;
-            }
-        }
-        true
+        self.tag_bits
+            .iter()
+            .zip(tag_bits.iter())
+            .all(|(a, b)| (a & b) == *b)
     }
     pub fn has_any(&self, tags: &[GameplayTag]) -> bool {
         let tag_bits = tag_bits_from_tags(tags);
-        for i in 0..MAX_TAG_BLOCKS {
-            if (self.tag_bits[i] & tag_bits[i]) != 0 {
-                return true;
-            }
-        }
-        false
+        self.tag_bits
+            .iter()
+            .zip(tag_bits.iter())
+            .any(|(a, b)| (a & b) != 0)
     }
 }

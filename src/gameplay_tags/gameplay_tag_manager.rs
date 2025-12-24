@@ -49,7 +49,7 @@ impl GameplayTagManager {
         // Create inherited bits: Start with parent's bits or new empty bits
         let mut inherited_bits = parent_tag_index
             .and_then(|p_index| self.tag_inherited_bits.get(p_index as usize).cloned())
-            .unwrap_or_else(GameplayTagBits::default);
+            .unwrap_or_default();
 
         // Set the current tag's own bit in the inherited bits
         let self_tag = GameplayTag::new(new_index);
@@ -61,10 +61,10 @@ impl GameplayTagManager {
             self.tag_inherited_bits.push(inherited_bits);
             self.tag_children.push(Vec::new());
         }
-        if let Some(p_index) = parent_tag_index {
-            if (p_index as usize) < self.tag_children.len() {
-                self.tag_children[p_index as usize].push(new_index);
-            }
+        if let Some(p_index) = parent_tag_index
+            && (p_index as usize) < self.tag_children.len()
+        {
+            self.tag_children[p_index as usize].push(new_index);
         }
         self.next_tag_index += 1;
 
@@ -74,7 +74,7 @@ impl GameplayTagManager {
     pub fn get_inherited_bits(&self, tag: &GameplayTag) -> Option<&GameplayTagBits> {
         self.tag_inherited_bits.get(tag.get_bit_index_usize())
     }
-    pub fn check_has_active_descendants(&self, tag_index: usize, ref_counts: &Box<[u16]>) -> bool {
+    pub fn check_has_active_descendants(&self, tag_index: usize, ref_counts: &[u16]) -> bool {
         let mut stack: Vec<u16> = Vec::new();
         if tag_index < self.tag_children.len() {
             stack.extend(self.tag_children[tag_index].iter().copied());
@@ -88,10 +88,10 @@ impl GameplayTagManager {
                 return true;
             }
 
-            if (index_usize) < self.tag_children.len() {
-                if let Some(children) = self.tag_children.get(index_usize) {
-                    stack.extend(children.iter().copied());
-                }
+            if (index_usize) < self.tag_children.len()
+                && let Some(children) = self.tag_children.get(index_usize)
+            {
+                stack.extend(children.iter().copied());
             }
         }
         false

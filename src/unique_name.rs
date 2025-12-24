@@ -2,11 +2,9 @@ use bevy::platform::collections::HashMap;
 use bevy::platform::hash::FixedHasher;
 use bevy::prelude::*;
 use core::fmt;
-use core::hash::{BuildHasher, Hash, Hasher};
+use core::hash::{BuildHasher, Hash};
 fn compute_hash(input: &str) -> u64 {
-    let mut hasher = FixedHasher::default().build_hasher();
-    input.hash(&mut hasher);
-    hasher.finish()
+    FixedHasher.hash_one(input)
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UniqueName(u32);
@@ -67,9 +65,7 @@ impl UniqueNamePool {
     }
 
     pub fn new_name(&mut self, name: &str) -> UniqueName {
-        UniqueName {
-            0: self.get_or_insert(name),
-        }
+        UniqueName(self.get_or_insert(name))
     }
 
     pub fn get_display_str(&self, name: &UniqueName) -> &str {
