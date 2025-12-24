@@ -51,14 +51,12 @@ impl GameplayTagContainer {
                 let mut current_block = block_bits;
 
                 while current_block != 0 {
-                    let bit_offset = current_block.trailing_zeros();
-                    let current_index = base_index + bit_offset as u16;
-                    let index_usize = current_index as usize;
-                    if index_usize < self.ref_counts.len() {
-                        self.ref_counts[index_usize] =
-                            self.ref_counts[index_usize].saturating_add(1);
-                    }
-                    current_block &= !(1u64 << bit_offset);
+                    let lsb = current_block & current_block.wrapping_neg();
+                    let bit_offset = lsb.trailing_zeros();
+                    let index_usize = base_index as usize + bit_offset as usize;
+                    debug_assert!(index_usize < self.ref_counts.len());
+                    self.ref_counts[index_usize] = self.ref_counts[index_usize].saturating_add(1);
+                    current_block ^= lsb;
                 }
             }
 
@@ -85,19 +83,16 @@ impl GameplayTagContainer {
                     let mut current_block = block_bits;
 
                     while current_block != 0 {
-                        let bit_offset = current_block.trailing_zeros();
-                        let current_index = (base_index as u32 + bit_offset) as usize;
-                        if current_index < self.ref_counts.len() {
-                            self.ref_counts[current_index] =
-                                self.ref_counts[current_index].saturating_sub(1);
-                            if self.ref_counts[current_index] == 0 {
-                                // mark this bit should be reset int Bitset
-                                let block = current_index >> BLOCK_SIZE_EXPONENT;
-                                let bit = current_index & (TAG_BITS_PER_BLOCK - 1);
-                                bits_to_clear[block] |= 1u64 << bit;
-                            }
+                        let lsb = current_block & current_block.wrapping_neg();
+                        let bit_offset = lsb.trailing_zeros();
+                        let index_usize = base_index as usize + bit_offset as usize;
+                        debug_assert!(index_usize < self.ref_counts.len());
+                        let cnt = &mut self.ref_counts[index_usize];
+                        *cnt = cnt.saturating_sub(1);
+                        if *cnt == 0 {
+                            bits_to_clear[block_index] |= lsb;
                         }
-                        current_block &= !(1u64 << bit_offset);
+                        current_block ^= lsb;
                     }
                 }
 
