@@ -7,14 +7,16 @@ pub const ATTRIBUTE_SET_SIZE: usize = GameplayAbilitySystemSettings::ATTRIBUTE_S
 #[derive(Component)]
 pub struct AttributeSet {
     attributes: Box<[Attribute]>,
-    aggregators: Vec<Aggregator>,
 }
 
 impl Default for AttributeSet {
     fn default() -> Self {
+        let mut attrs = Vec::with_capacity(ATTRIBUTE_SET_SIZE);
+        for _ in 0..ATTRIBUTE_SET_SIZE {
+            attrs.push(Attribute::default());
+        }
         Self {
-            attributes: Box::new([Attribute::default(); ATTRIBUTE_SET_SIZE]),
-            aggregators: vec![Aggregator::new(default_executor); ATTRIBUTE_SET_SIZE],
+            attributes: attrs.into_boxed_slice(),
         }
     }
 }
@@ -24,16 +26,23 @@ impl AttributeSet {
         &mut self,
         id: AttributeId,
         base_value: f64,
-        aggregator: Option<Aggregator>,
+        executor: Option<fn(&Aggregator, f64) -> f64>,
     ) {
         let index = id.to_index();
-        if index >= ATTRIBUTE_SET_SIZE {
-            panic!("Exceeded ATTRIBUTE_SET_SIZE")
-        }
+        debug_assert!(index < self.attributes.len());
         let attr = &mut self.attributes[index];
-        attr.init(base_value);
-        if let Some(aggregator) = aggregator {
-            self.aggregators[index] = aggregator;
+        attr.init(base_value, executor);
+    }
+
+    pub fn recalculate_attribute(&mut self, id: AttributeId) {
+        let index = id.to_index();
+        debug_assert!(index < self.attributes.len());
+        self.attributes[index].recalculate();
+    }
+
+    pub fn recalculate_all(&mut self) {
+        for attr in self.attributes.iter_mut() {
+            attr.recalculate();
         }
     }
 }
