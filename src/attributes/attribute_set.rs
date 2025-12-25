@@ -7,29 +7,25 @@ pub const ATTRIBUTE_SET_SIZE: usize = GameplayAbilitySystemSettings::ATTRIBUTE_S
 #[derive(Component)]
 pub struct AttributeSet {
     attributes: Box<[Attribute]>,
+    _aggregator: Vec<Aggregator>,
 }
 
 impl Default for AttributeSet {
     fn default() -> Self {
         Self {
             attributes: Box::new([Attribute::default(); ATTRIBUTE_SET_SIZE]),
+            _aggregator: vec![Aggregator::default(); ATTRIBUTE_SET_SIZE],
         }
     }
 }
 
 impl AttributeSet {
-    pub fn initialize_attribute(
-        &mut self,
-        id: AttributeId,
-        base_value: f64,
-        clamp_min: Option<f64>,
-        clamp_max: Option<f64>,
-    ) {
+    pub fn initialize_attribute(&mut self, id: AttributeId, base_value: f64) {
         let index = id.to_index();
         if index >= ATTRIBUTE_SET_SIZE {
             panic!("Exceeded ATTRIBUTE_SET_SIZE")
         }
         let attr = &mut self.attributes[index];
-        attr.init(base_value, clamp_min, clamp_max);
+        attr.init(base_value);
     }
 }
