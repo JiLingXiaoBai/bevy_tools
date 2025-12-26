@@ -3,8 +3,8 @@ use crate::attributes::AttributeId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModifierOperation {
     Add,
+    PercentAdd,
     Multiply,
-    Divide,
     Override,
 }
 

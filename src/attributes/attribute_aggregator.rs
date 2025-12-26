@@ -25,52 +25,42 @@ pub struct Aggregator {
     percent_additive: Vec<f64>,
     multiplicative: Vec<f64>,
     override_value: Option<f64>,
-    cached: f64,
-    dirty: bool,
     executor: fn(&Aggregator, f64) -> f64,
 }
 
-impl Aggregator {
-    pub fn new(executor: fn(&Aggregator, f64) -> f64) -> Self {
+impl Default for Aggregator {
+    fn default() -> Self {
         Self {
             additive: Vec::new(),
             percent_additive: Vec::new(),
             multiplicative: Vec::new(),
             override_value: None,
-            cached: 0.0,
-            dirty: true,
-            executor,
+            executor: default_executor,
         }
     }
+}
 
-    pub fn set_executor(&mut self, executor: fn(&Aggregator, f64) -> f64) {
-        self.executor = executor;
-        self.make_dirty();
-    }
-
-    #[inline]
-    pub fn make_dirty(&mut self) {
-        self.dirty = true;
+impl Aggregator {
+    pub fn set_executor(&mut self, executor: Option<fn(&Aggregator, f64) -> f64>) {
+        if let Some(executor) = executor {
+            self.executor = executor;
+        }
     }
 
     pub fn add_additive(&mut self, value: f64) {
         self.additive.push(value);
-        self.make_dirty();
     }
 
     pub fn add_multiplicative(&mut self, value: f64) {
         self.multiplicative.push(value);
-        self.make_dirty();
     }
 
     pub fn add_percent_additive(&mut self, value: f64) {
         self.percent_additive.push(value);
-        self.make_dirty();
     }
 
     pub fn set_override(&mut self, value: f64) {
         self.override_value = Some(value);
-        self.make_dirty();
     }
 
     pub fn reset(&mut self) {
@@ -78,14 +68,9 @@ impl Aggregator {
         self.percent_additive.clear();
         self.multiplicative.clear();
         self.override_value = None;
-        self.make_dirty();
     }
 
     pub fn evaluate(&mut self, base_value: f64) -> f64 {
-        if self.dirty {
-            self.cached = (self.executor)(self, base_value);
-            self.dirty = false;
-        }
-        self.cached
+        (self.executor)(self, base_value)
     }
 }
