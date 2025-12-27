@@ -50,11 +50,11 @@ impl AttributeSet {
             .for_each(|attr| attr.recalculate());
     }
 
-    pub fn get_value(&mut self, id: AttributeId) -> Option<f64> {
+    pub fn get_current_value(&self, id: AttributeId) -> Option<f64> {
         let index = id.to_index();
         debug_assert!(index < self.attributes.len());
-        if let Some(attr) = &mut self.attributes[index] {
-            return Some(attr.get_value());
+        if let Some(attr) = &self.attributes[index] {
+            return Some(attr.get_current_value());
         }
         None
     }

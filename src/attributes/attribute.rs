@@ -1,4 +1,6 @@
 use super::attribute_aggregator::Aggregator;
+use crate::gameplay_effects::ActiveEffectHandle;
+use crate::modifiers::ModifierSpec;
 #[derive(Debug, Clone)]
 pub struct Attribute {
     base: f64,
@@ -32,8 +34,8 @@ impl Attribute {
         }
     }
 
-    pub fn get_value(&mut self) -> f64 {
-        self.recalculate();
+    pub fn get_current_value(&self) -> f64 {
+        debug_assert!(!self.dirty);
         self.current
     }
 
@@ -47,24 +49,15 @@ impl Attribute {
         self.make_dirty();
     }
 
-    pub fn add_additive(&mut self, value: f64) {
-        self.aggregator.add_additive(value);
+    pub fn apply_modifier_spec(&mut self, spec: &ModifierSpec, handle: ActiveEffectHandle) {
+        self.aggregator.apply_modifier_spec(spec, handle);
         self.make_dirty();
     }
 
-    pub fn add_multiplicative(&mut self, value: f64) {
-        self.aggregator.add_multiplicative(value);
+    pub fn remove_modifier_by_handle(&mut self, handle: ActiveEffectHandle) {
+        self.aggregator.remove_modifier_by_handle(handle);
         self.make_dirty();
-    }
-
-    pub fn add_percent_additive(&mut self, value: f64) {
-        self.aggregator.add_percent_additive(value);
-        self.make_dirty();
-    }
-
-    pub fn set_override(&mut self, value: f64) {
-        self.aggregator.set_override(value);
-        self.make_dirty();
+        self.recalculate();
     }
 
     pub fn reset_aggregator(&mut self) {

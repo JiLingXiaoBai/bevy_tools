@@ -1,4 +1,5 @@
 use crate::attributes::AttributeId;
+use crate::gameplay_effects::{ActiveEffectHandle, EffectContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModifierOperation {
@@ -14,11 +15,71 @@ pub enum ModifierMagnitude {
 }
 
 pub trait ModifierMagnitudeCalculation: Send + Sync {
-    // fn calculate(&self, source: &AttributeSet, target: &AttributeSet) -> f64;
+    fn calculate(&self, context: &EffectContext) -> f64;
 }
 
 pub struct Modifier {
-    pub id: AttributeId,
-    pub op: ModifierOperation,
-    pub magnitude: ModifierMagnitude,
+    id: AttributeId,
+    op: ModifierOperation,
+    magnitude: ModifierMagnitude,
+}
+
+impl Modifier {
+    pub fn new(id: AttributeId, op: ModifierOperation, magnitude: ModifierMagnitude) -> Self {
+        Modifier { id, op, magnitude }
+    }
+
+    pub fn make_spec(&self, context: &EffectContext) -> ModifierSpec {
+        let final_value = match &self.magnitude {
+            ModifierMagnitude::Flat(value) => *value,
+            ModifierMagnitude::Calculated(calc) => calc.calculate(context),
+        };
+
+        ModifierSpec {
+            id: self.id,
+            op: self.op,
+            value: final_value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ModifierSpec {
+    id: AttributeId,
+    op: ModifierOperation,
+    value: f64,
+}
+
+impl ModifierSpec {
+    pub fn get_id(&self) -> AttributeId {
+        self.id
+    }
+
+    pub fn get_operation(&self) -> ModifierOperation {
+        self.op
+    }
+
+    pub fn get_value(&self) -> f64 {
+        self.value
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AppliedModifier {
+    handle: ActiveEffectHandle,
+    value: f64,
+}
+
+impl AppliedModifier {
+    pub fn new(handle: ActiveEffectHandle, value: f64) -> Self {
+        AppliedModifier { handle, value }
+    }
+
+    pub fn get_handle(&self) -> ActiveEffectHandle {
+        self.handle
+    }
+
+    pub fn get_value(&self) -> f64 {
+        self.value
+    }
 }

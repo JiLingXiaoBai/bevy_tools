@@ -1,19 +1,22 @@
+use crate::gameplay_effects::ActiveEffectHandle;
+use crate::modifiers::{AppliedModifier, ModifierOperation, ModifierSpec};
+
 pub fn default_executor(aggregator: &Aggregator, base_value: f64) -> f64 {
     if let Some(override_value) = aggregator.override_value {
-        return override_value;
+        return override_value.get_value();
     }
     let mut final_value = base_value;
     for &add in &aggregator.additive {
-        final_value += add;
+        final_value += add.get_value();
     }
     let mut percent_sum = 0.0;
     for &percent in &aggregator.percent_additive {
-        percent_sum += percent;
+        percent_sum += percent.get_value();
     }
     final_value *= 1.0 + percent_sum;
 
     for &multiplier in &aggregator.multiplicative {
-        final_value *= multiplier;
+        final_value *= multiplier.get_value();
     }
 
     final_value
@@ -21,10 +24,10 @@ pub fn default_executor(aggregator: &Aggregator, base_value: f64) -> f64 {
 
 #[derive(Debug, Clone)]
 pub struct Aggregator {
-    additive: Vec<f64>,
-    percent_additive: Vec<f64>,
-    multiplicative: Vec<f64>,
-    override_value: Option<f64>,
+    additive: Vec<AppliedModifier>,
+    percent_additive: Vec<AppliedModifier>,
+    multiplicative: Vec<AppliedModifier>,
+    override_value: Option<AppliedModifier>,
     executor: fn(&Aggregator, f64) -> f64,
 }
 
@@ -47,20 +50,28 @@ impl Aggregator {
         }
     }
 
-    pub fn add_additive(&mut self, value: f64) {
-        self.additive.push(value);
+    pub fn apply_modifier_spec(&mut self, spec: &ModifierSpec, handle: ActiveEffectHandle) {
+        let applied_modifier = AppliedModifier::new(handle, spec.get_value());
+        match spec.get_operation() {
+            ModifierOperation::Add => self.additive.push(applied_modifier),
+            ModifierOperation::Multiply => self.multiplicative.push(applied_modifier),
+            ModifierOperation::PercentAdd => self.percent_additive.push(applied_modifier),
+            ModifierOperation::Override => self.override_value = Some(applied_modifier),
+        }
     }
 
-    pub fn add_multiplicative(&mut self, value: f64) {
-        self.multiplicative.push(value);
-    }
-
-    pub fn add_percent_additive(&mut self, value: f64) {
-        self.percent_additive.push(value);
-    }
-
-    pub fn set_override(&mut self, value: f64) {
-        self.override_value = Some(value);
+    pub fn remove_modifier_by_handle(&mut self, handle: ActiveEffectHandle) {
+        self.additive
+            .retain(|modifier| modifier.get_handle() != handle);
+        self.percent_additive
+            .retain(|modifier| modifier.get_handle() != handle);
+        self.multiplicative
+            .retain(|modifier| modifier.get_handle() != handle);
+        if let Some(override_modifier) = self.override_value
+            && override_modifier.get_handle() == handle
+        {
+            self.override_value = None;
+        }
     }
 
     pub fn reset(&mut self) {
@@ -70,7 +81,7 @@ impl Aggregator {
         self.override_value = None;
     }
 
-    pub fn evaluate(&mut self, base_value: f64) -> f64 {
+    pub fn evaluate(&self, base_value: f64) -> f64 {
         (self.executor)(self, base_value)
     }
 }
