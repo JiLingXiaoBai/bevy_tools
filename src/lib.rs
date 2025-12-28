@@ -1,4 +1,5 @@
 mod attributes;
+mod gameplay_abilities;
 mod gameplay_effects;
 mod gameplay_tags;
 mod modifiers;
@@ -8,6 +9,7 @@ mod unique_name;
 pub use attributes::*;
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
+pub use gameplay_abilities::*;
 pub use gameplay_effects::*;
 pub use gameplay_tags::*;
 pub use modifiers::*;
