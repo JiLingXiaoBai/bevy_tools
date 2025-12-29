@@ -1,26 +1,45 @@
 use super::EffectContext;
 use crate::gameplay_tags::GameplayTag;
-use crate::modifiers::{Modifier, ModifierSpec};
+use crate::modifiers::{Modifier, ModifierMagnitude, ModifierSpec};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy)]
 pub enum EffectDuration {
     Instant,
-    Duration(f32),
+    Duration(ModifierMagnitude),
     Infinite,
 }
 
 impl EffectDuration {
+    pub fn make_spec(&self, context: &EffectContext) -> EffectDurationSpec {
+        match self {
+            EffectDuration::Instant => EffectDurationSpec::Instant,
+            EffectDuration::Duration(mm) => EffectDurationSpec::Duration(match mm {
+                ModifierMagnitude::Flat(f) => *f,
+                ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
+            }),
+            EffectDuration::Infinite => EffectDurationSpec::Infinite,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum EffectDurationSpec {
+    Instant,
+    Duration(f64),
+    Infinite,
+}
+
+impl EffectDurationSpec {
     pub fn is_infinite(&self) -> bool {
-        matches!(self, EffectDuration::Infinite)
+        matches!(self, EffectDurationSpec::Infinite)
     }
 
     pub fn is_instant(&self) -> bool {
-        matches!(self, EffectDuration::Instant)
+        matches!(self, EffectDurationSpec::Instant)
     }
 
     pub fn is_duration(&self) -> bool {
-        matches!(self, EffectDuration::Duration(_))
+        matches!(self, EffectDurationSpec::Duration(_))
     }
 }
 
@@ -46,7 +65,7 @@ impl GameplayEffect {
                 .iter()
                 .map(|m| m.make_spec(&context))
                 .collect(),
-            duration: self.duration,
+            duration: self.duration.make_spec(&context),
             _level: context.level,
         }
     }
@@ -56,7 +75,7 @@ impl GameplayEffect {
 pub struct GameplayEffectSpec {
     def: Arc<GameplayEffect>,
     _modifier_specs: Vec<ModifierSpec>,
-    duration: EffectDuration,
+    duration: EffectDurationSpec,
     _level: u32,
 }
 
@@ -87,21 +106,19 @@ pub struct ActiveGameplayEffect {
 impl ActiveGameplayEffect {
     pub fn is_expired(&self, current_time: f64) -> bool {
         match self.spec.duration {
-            EffectDuration::Instant => true,
-            EffectDuration::Duration(duration) => {
-                (current_time - self.start_time) >= duration as f64
-            }
-            EffectDuration::Infinite => false,
+            EffectDurationSpec::Instant => true,
+            EffectDurationSpec::Duration(duration) => (current_time - self.start_time) >= duration,
+            EffectDurationSpec::Infinite => false,
         }
     }
 
     pub fn get_time_remaining(&self, current_time: f64) -> Option<f64> {
         match self.spec.duration {
-            EffectDuration::Instant => None,
-            EffectDuration::Duration(duration) => {
-                Some(duration as f64 - (current_time - self.start_time))
+            EffectDurationSpec::Instant => None,
+            EffectDurationSpec::Duration(duration) => {
+                Some(duration - (current_time - self.start_time))
             }
-            EffectDuration::Infinite => None,
+            EffectDurationSpec::Infinite => None,
         }
     }
 }
