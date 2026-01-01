@@ -1,6 +1,6 @@
 use super::attribute_aggregator::Aggregator;
 use crate::gameplay_effects::ActiveEffectHandle;
-use crate::modifiers::ModifierSpec;
+use crate::modifiers::{ModifierOperation, ModifierSpec};
 #[derive(Debug, Clone)]
 pub struct Attribute {
     base: f64,
@@ -58,6 +58,16 @@ impl Attribute {
         self.aggregator.remove_modifier_by_handle(handle);
         self.make_dirty();
         self.recalculate();
+    }
+
+    pub fn modify_base_value(&mut self, spec: &ModifierSpec) {
+        match spec.get_operation() {
+            ModifierOperation::Add => self.base += spec.get_value(),
+            ModifierOperation::PercentAdd => self.base *= 1.0 + spec.get_value(),
+            ModifierOperation::Multiply => self.base *= spec.get_value(),
+            ModifierOperation::Override => self.base = spec.get_value(),
+        }
+        self.make_dirty();
     }
 
     pub fn reset_aggregator(&mut self) {

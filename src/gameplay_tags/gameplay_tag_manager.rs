@@ -1,6 +1,6 @@
 use super::*;
 use crate::settings::GameplayAbilitySystemSettings;
-use crate::unique_name::UniqueName;
+use crate::unique_names::UniqueName;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 pub const MAX_TAG_COUNTS: usize = GameplayAbilitySystemSettings::GAMEPLAY_TAG_SIZE;

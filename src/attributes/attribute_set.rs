@@ -1,4 +1,6 @@
 use super::*;
+use crate::gameplay_effects::ActiveEffectHandle;
+use crate::modifiers::ModifierSpec;
 use crate::settings::GameplayAbilitySystemSettings;
 use bevy::prelude::*;
 
@@ -57,5 +59,28 @@ impl AttributeSet {
             return Some(attr.get_current_value());
         }
         None
+    }
+
+    pub fn apply_instant_modifier(&mut self, spec: &ModifierSpec) {
+        let index = spec.get_id().to_index();
+        debug_assert!(index < self.attributes.len());
+        if let Some(attr) = &mut self.attributes[index] {
+            attr.modify_base_value(spec);
+        }
+    }
+
+    pub fn apply_duration_modifier(&mut self, spec: &ModifierSpec, handle: ActiveEffectHandle) {
+        let index = spec.get_id().to_index();
+        debug_assert!(index < self.attributes.len());
+        if let Some(attr) = &mut self.attributes[index] {
+            attr.apply_modifier_spec(spec, handle);
+        }
+    }
+
+    pub fn remove_modifiers(&mut self, handle: ActiveEffectHandle) {
+        self.attributes
+            .iter_mut()
+            .flatten()
+            .for_each(|attr| attr.remove_modifier_by_handle(handle));
     }
 }

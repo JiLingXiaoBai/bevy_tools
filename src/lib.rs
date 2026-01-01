@@ -3,8 +3,9 @@ mod gameplay_abilities;
 mod gameplay_effects;
 mod gameplay_tags;
 mod modifiers;
+mod randoms;
 mod settings;
-mod unique_name;
+mod unique_names;
 
 pub use attributes::*;
 use bevy::app::PluginGroupBuilder;
@@ -13,8 +14,9 @@ pub use gameplay_abilities::*;
 pub use gameplay_effects::*;
 pub use gameplay_tags::*;
 pub use modifiers::*;
+pub use randoms::*;
 pub use settings::*;
-pub use unique_name::*;
+pub use unique_names::*;
 extern crate core;
 
 pub struct GameplayTagPlugin;
@@ -22,6 +24,7 @@ pub struct GameplayTagPlugin;
 impl Plugin for GameplayTagPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameplayTagManager>();
+        app.init_resource::<Random>();
     }
 }
 

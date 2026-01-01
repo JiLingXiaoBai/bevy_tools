@@ -1,6 +1,7 @@
-use super::EffectContext;
+use super::gameplay_effect_context::EffectContext;
+use super::gameplay_effect_spec::{EffectDurationSpec, EffectPeriodSpec, GameplayEffectSpec};
 use crate::gameplay_tags::GameplayTag;
-use crate::modifiers::{Modifier, ModifierMagnitude, ModifierSpec};
+use crate::modifiers::{Modifier, ModifierMagnitude};
 use std::sync::Arc;
 
 pub enum EffectDuration {
@@ -22,103 +23,86 @@ impl EffectDuration {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum EffectDurationSpec {
-    Instant,
-    Duration(f64),
-    Infinite,
+pub struct EffectPeriod {
+    period: ModifierMagnitude,
+    execute_on_applied: bool,
 }
 
-impl EffectDurationSpec {
-    pub fn is_infinite(&self) -> bool {
-        matches!(self, EffectDurationSpec::Infinite)
+impl EffectPeriod {
+    pub fn make_spec(&self, context: &EffectContext) -> EffectPeriodSpec {
+        let final_value = match &self.period {
+            ModifierMagnitude::Flat(f) => *f,
+            ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
+        };
+        EffectPeriodSpec::new(final_value, self.execute_on_applied)
     }
+}
 
-    pub fn is_instant(&self) -> bool {
-        matches!(self, EffectDurationSpec::Instant)
-    }
-
-    pub fn is_duration(&self) -> bool {
-        matches!(self, EffectDurationSpec::Duration(_))
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum StackingType {
+    None,
+    Aggregate,
+    Override,
 }
 
 pub struct EffectTags {
+    asset_tags: Vec<GameplayTag>,
     granted_tags: Vec<GameplayTag>,
     required_tags: Vec<GameplayTag>,
     blocked_tags: Vec<GameplayTag>,
+    remove_effects_with_tags: Vec<GameplayTag>,
+}
+
+impl EffectTags {
+    pub fn get_asset_tags(&self) -> &[GameplayTag] {
+        &self.asset_tags
+    }
+
+    pub fn get_granted_tags(&self) -> &[GameplayTag] {
+        &self.granted_tags
+    }
+
+    pub fn get_required_tags(&self) -> &[GameplayTag] {
+        &self.required_tags
+    }
+
+    pub fn get_blocked_tags(&self) -> &[GameplayTag] {
+        &self.blocked_tags
+    }
+
+    pub fn get_remove_effects_with_tags(&self) -> &[GameplayTag] {
+        &self.remove_effects_with_tags
+    }
 }
 
 // stored as a Resource
 pub struct GameplayEffect {
     modifiers: Vec<Modifier>,
     duration: EffectDuration,
+    period: Option<EffectPeriod>,
+    _probability_to_apply: f64,
+    stacking_type: StackingType,
+    stacking_limit: u32,
     tags: EffectTags,
 }
 
 impl GameplayEffect {
     pub fn make_spec(self: &Arc<Self>, context: EffectContext) -> GameplayEffectSpec {
-        GameplayEffectSpec {
-            def: self.clone(),
-            _modifier_specs: self
-                .modifiers
+        GameplayEffectSpec::new(
+            self.clone(),
+            self.modifiers
                 .iter()
                 .map(|m| m.make_spec(&context))
                 .collect(),
-            duration: self.duration.make_spec(&context),
-            _level: context.level,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct GameplayEffectSpec {
-    def: Arc<GameplayEffect>,
-    _modifier_specs: Vec<ModifierSpec>,
-    duration: EffectDurationSpec,
-    _level: u32,
-}
-
-impl GameplayEffectSpec {
-    pub fn get_granted_tags(&self) -> &[GameplayTag] {
-        &self.def.tags.granted_tags
+            self.duration.make_spec(&context),
+            self.period.as_ref().map(|p| p.make_spec(&context)),
+            self.stacking_type,
+            self.stacking_limit,
+            context.level,
+        )
     }
 
-    pub fn get_required_tags(&self) -> &[GameplayTag] {
-        &self.def.tags.required_tags
-    }
-
-    pub fn get_blocked_tags(&self) -> &[GameplayTag] {
-        &self.def.tags.blocked_tags
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ActiveEffectHandle(u64);
-
-pub struct ActiveGameplayEffect {
-    _handle: ActiveEffectHandle,
-    spec: GameplayEffectSpec,
-    start_time: f64,
-    _is_inhibited: bool,
-}
-
-impl ActiveGameplayEffect {
-    pub fn is_expired(&self, current_time: f64) -> bool {
-        match self.spec.duration {
-            EffectDurationSpec::Instant => true,
-            EffectDurationSpec::Duration(duration) => (current_time - self.start_time) >= duration,
-            EffectDurationSpec::Infinite => false,
-        }
-    }
-
-    pub fn get_time_remaining(&self, current_time: f64) -> Option<f64> {
-        match self.spec.duration {
-            EffectDurationSpec::Instant => None,
-            EffectDurationSpec::Duration(duration) => {
-                Some(duration - (current_time - self.start_time))
-            }
-            EffectDurationSpec::Infinite => None,
-        }
+    pub fn get_tags(&self) -> &EffectTags {
+        &self.tags
     }
 }

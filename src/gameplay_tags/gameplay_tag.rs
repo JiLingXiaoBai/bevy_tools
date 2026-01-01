@@ -1,5 +1,5 @@
 use super::*;
-use crate::unique_name::UniqueNamePool;
+use crate::unique_names::UniqueNamePool;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::ResMut;
 
