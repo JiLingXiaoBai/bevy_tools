@@ -42,7 +42,7 @@ impl EffectPeriodSpec {
 #[derive(Clone)]
 pub struct GameplayEffectSpec {
     def: Arc<GameplayEffect>,
-    _modifier_specs: Vec<ModifierSpec>,
+    modifier_specs: Vec<ModifierSpec>,
     duration_spec: EffectDurationSpec,
     _period_spec: Option<EffectPeriodSpec>,
     _stacking_type: StackingType,
@@ -62,7 +62,7 @@ impl GameplayEffectSpec {
     ) -> Self {
         Self {
             def,
-            _modifier_specs: modifier_specs,
+            modifier_specs,
             duration_spec,
             _period_spec: period_spec,
             _stacking_type: stacking_type,
@@ -93,5 +93,9 @@ impl GameplayEffectSpec {
 
     pub fn get_duration_spec(&self) -> &EffectDurationSpec {
         &(self.duration_spec)
+    }
+
+    pub fn get_modifier_specs(&self) -> &[ModifierSpec] {
+        &self.modifier_specs
     }
 }

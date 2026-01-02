@@ -80,22 +80,22 @@ pub struct GameplayEffect {
     modifiers: Vec<Modifier>,
     duration: EffectDuration,
     period: Option<EffectPeriod>,
-    _probability_to_apply: f64,
+    probability_to_apply: f64,
     stacking_type: StackingType,
     stacking_limit: u32,
     tags: EffectTags,
 }
 
 impl GameplayEffect {
-    pub fn make_spec(self: &Arc<Self>, context: EffectContext) -> GameplayEffectSpec {
+    pub fn make_spec(self: &Arc<Self>, context: &EffectContext) -> GameplayEffectSpec {
         GameplayEffectSpec::new(
             self.clone(),
             self.modifiers
                 .iter()
-                .map(|m| m.make_spec(&context))
+                .map(|m| m.make_spec(context))
                 .collect(),
-            self.duration.make_spec(&context),
-            self.period.as_ref().map(|p| p.make_spec(&context)),
+            self.duration.make_spec(context),
+            self.period.as_ref().map(|p| p.make_spec(context)),
             self.stacking_type,
             self.stacking_limit,
             context.level,
@@ -104,5 +104,9 @@ impl GameplayEffect {
 
     pub fn get_tags(&self) -> &EffectTags {
         &self.tags
+    }
+
+    pub fn get_probability_to_apply(&self) -> f64 {
+        self.probability_to_apply
     }
 }

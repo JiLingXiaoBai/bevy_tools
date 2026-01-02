@@ -1,12 +1,13 @@
-use std::sync::Arc;
-
 use crate::gameplay_effects::GameplayEffect;
 use crate::gameplay_tags::GameplayTag;
+use std::sync::Arc;
 
 pub struct AbilityTags {
     _ability_asset_tags: Vec<GameplayTag>,
     _cancel_abilities_with_tags: Vec<GameplayTag>,
     _block_abilities_with_tags: Vec<GameplayTag>,
+    _activation_required_tags: Vec<GameplayTag>,
+    _activation_blocked_tags: Vec<GameplayTag>,
 }
 
 pub struct GameplayAbility {

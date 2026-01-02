@@ -24,7 +24,6 @@ pub struct GameplayTagPlugin;
 impl Plugin for GameplayTagPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameplayTagManager>();
-        app.init_resource::<Random>();
     }
 }
 
