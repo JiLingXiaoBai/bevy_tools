@@ -1,5 +1,4 @@
-use super::{GameplayEffect, StackingType};
-use crate::gameplay_tags::GameplayTag;
+use super::{EffectTags, GameplayEffect, StackingType};
 use crate::modifiers::ModifierSpec;
 use std::sync::Arc;
 
@@ -26,16 +25,24 @@ impl EffectDurationSpec {
 
 #[derive(Debug, Clone, Copy)]
 pub struct EffectPeriodSpec {
-    _period: f64,
-    _execute_on_applied: bool,
+    period: f64,
+    execute_on_applied: bool,
 }
 
 impl EffectPeriodSpec {
     pub fn new(period: f64, execute_on_applied: bool) -> Self {
         Self {
-            _period: period,
-            _execute_on_applied: execute_on_applied,
+            period,
+            execute_on_applied,
         }
+    }
+
+    pub fn get_period(&self) -> f64 {
+        self.period
+    }
+
+    pub fn get_execute_on_applied(&self) -> bool {
+        self.execute_on_applied
     }
 }
 
@@ -44,7 +51,7 @@ pub struct GameplayEffectSpec {
     def: Arc<GameplayEffect>,
     modifier_specs: Vec<ModifierSpec>,
     duration_spec: EffectDurationSpec,
-    _period_spec: Option<EffectPeriodSpec>,
+    period_spec: Option<EffectPeriodSpec>,
     _stacking_type: StackingType,
     _stacking_limit: u32,
     _level: u32,
@@ -64,31 +71,15 @@ impl GameplayEffectSpec {
             def,
             modifier_specs,
             duration_spec,
-            _period_spec: period_spec,
+            period_spec,
             _stacking_type: stacking_type,
             _stacking_limit: stacking_limit,
             _level: level,
         }
     }
 
-    pub fn get_asset_tags(&self) -> &[GameplayTag] {
-        self.def.get_tags().get_asset_tags()
-    }
-
-    pub fn get_granted_tags(&self) -> &[GameplayTag] {
-        self.def.get_tags().get_granted_tags()
-    }
-
-    pub fn get_required_tags(&self) -> &[GameplayTag] {
-        self.def.get_tags().get_required_tags()
-    }
-
-    pub fn get_blocked_tags(&self) -> &[GameplayTag] {
-        self.def.get_tags().get_blocked_tags()
-    }
-
-    pub fn get_remove_effects_with_tags(&self) -> &[GameplayTag] {
-        self.def.get_tags().get_remove_effects_with_tags()
+    pub fn get_def_tags(&self) -> &EffectTags {
+        self.def.get_tags()
     }
 
     pub fn get_duration_spec(&self) -> &EffectDurationSpec {
@@ -97,5 +88,9 @@ impl GameplayEffectSpec {
 
     pub fn get_modifier_specs(&self) -> &[ModifierSpec] {
         &self.modifier_specs
+    }
+
+    pub fn get_period_spec(&self) -> &Option<EffectPeriodSpec> {
+        &self.period_spec
     }
 }

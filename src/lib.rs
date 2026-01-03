@@ -1,3 +1,4 @@
+mod ability_system;
 mod attributes;
 mod gameplay_abilities;
 mod gameplay_effects;
@@ -7,6 +8,7 @@ mod randoms;
 mod settings;
 mod unique_names;
 
+pub use ability_system::*;
 pub use attributes::*;
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;

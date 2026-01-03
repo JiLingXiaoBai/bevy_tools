@@ -1,8 +1,10 @@
 use super::gameplay_effect::GameplayEffect;
 use super::gameplay_effect_context::{EffectContext, EffectContextEntityType};
 use super::gameplay_effect_spec::{EffectDurationSpec, GameplayEffectSpec};
+use crate::attributes::AttributeSet;
 use crate::gameplay_tags::GameplayTagManager;
 use crate::randoms::Random;
+use crate::{AbilitySystemComponent, GameplayTagContainer};
 use bevy::prelude::*;
 use std::sync::Arc;
 
@@ -10,20 +12,25 @@ use std::sync::Arc;
 pub struct ActiveEffectHandle(u64);
 
 pub struct ActiveGameplayEffect {
-    _handle: ActiveEffectHandle,
+    handle: ActiveEffectHandle,
     spec: GameplayEffectSpec,
     start_time: f64,
-    _last_period_tick_time: Option<f64>,
+    last_period_tick_time: Option<f64>,
     _is_inhibited: bool,
 }
 
 impl ActiveGameplayEffect {
-    pub fn new(handle: ActiveEffectHandle, spec: GameplayEffectSpec, start_time: f64) -> Self {
+    pub fn new(
+        handle: ActiveEffectHandle,
+        spec: GameplayEffectSpec,
+        start_time: f64,
+        last_period_tick_time: Option<f64>,
+    ) -> Self {
         Self {
-            _handle: handle,
+            handle,
             spec,
             start_time,
-            _last_period_tick_time: None,
+            last_period_tick_time,
             _is_inhibited: false,
         }
     }
@@ -45,6 +52,34 @@ impl ActiveGameplayEffect {
             EffectDurationSpec::Infinite => None,
         }
     }
+
+    pub fn get_handle(&self) -> ActiveEffectHandle {
+        self.handle
+    }
+
+    pub fn set_last_period_tick_time(&mut self, time: f64) {
+        self.last_period_tick_time = Some(time);
+    }
+
+    pub fn get_last_period_tick_time(&self) -> Option<f64> {
+        self.last_period_tick_time
+    }
+
+    pub fn can_period_tick(&self, current_time: f64) -> bool {
+        if let Some(period_spec) = &self.spec.get_period_spec()
+            && let Some(last_period_tick_time) = self.last_period_tick_time
+        {
+            let period_duration = period_spec.get_period();
+            if period_duration > 0.0 {
+                let time_since_last_tick = current_time - last_period_tick_time;
+                time_since_last_tick >= period_duration
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -57,40 +92,51 @@ impl ActiveEffectHandleGenerator {
     }
 }
 
-#[derive(Component, Default)]
-pub struct ActiveEffects {
-    pub list: Vec<ActiveGameplayEffect>,
-}
-
 pub fn apply_gameplay_effect(
+    source: Entity,
+    target: Entity,
     effect_def: &Arc<GameplayEffect>,
-    context: &mut EffectContext,
     tag_manager: &Res<GameplayTagManager>,
     handle_gen: &mut ResMut<ActiveEffectHandleGenerator>,
     random_gen: &mut ResMut<Random>,
+    attr_set_query: &mut Query<&mut AttributeSet>,
+    tag_container_query: &mut Query<&mut GameplayTagContainer>,
+    asc_query: &mut Query<&mut AbilitySystemComponent>,
     time: &Res<Time>,
+    level: u32,
+    context: EffectContext,
 ) {
     let probability = effect_def.get_probability_to_apply();
     if probability < 1.0 && !random_gen.random_bool(probability) {
         return;
     }
 
-    if let Some(target_tags) = context.get_tag_container_mut(EffectContextEntityType::Target) {
-        let tags = effect_def.get_tags();
-        if !target_tags.has_all(tags.get_required_tags())
-            || target_tags.has_any(tags.get_blocked_tags())
-        {
-            return;
-        }
+    let tags = effect_def.get_tags();
+
+    let target_tags = tag_container_query.get(target).unwrap();
+
+    if !target_tags.has_all(tags.get_required_tags())
+        || target_tags.has_any(tags.get_blocked_tags())
+    {
+        return;
     }
 
-    let spec = effect_def.make_spec(context);
+    // let attr_ro = attr_set_query.as_readonly();
+    // let tag_container_ro = tag_container_query.as_readonly();
+    // let asc_ro = asc_query.as_readonly();
+    // let context = EffectContext {
+    //     source: Some(source),
+    //     target: Some(target),
+    //     attr_set_query: &attr_ro,
+    //     tag_container_query: &tag_container_ro,
+    //     asc_query: &asc_ro,
+    //     level,
+    // };
+
+    let spec = effect_def.make_spec(&context);
     let duration_spec = spec.get_duration_spec();
 
-    let mut target_attrs = context
-        .get_attr_set_mut(EffectContextEntityType::Target)
-        .expect("Target has no attribute set");
-
+    let mut target_attrs = attr_set_query.get_mut(target).unwrap();
     if duration_spec.is_instant() {
         for mod_spec in spec.get_modifier_specs() {
             target_attrs.apply_instant_modifier(mod_spec);
@@ -98,24 +144,73 @@ pub fn apply_gameplay_effect(
         return;
     }
 
-    // TODO: Stacking Logic
+    // TODO: Stacking Logic, Inhibited Logic
 
-    let handle = handle_gen.generate();
     let start_time = time.elapsed_secs_f64();
-
-    let active_effect = ActiveGameplayEffect::new(handle, spec.clone(), start_time);
-    for mod_spec in spec.get_modifier_specs() {
-        target_attrs.apply_duration_modifier(mod_spec, handle);
+    let handle = handle_gen.generate();
+    let period_spec = spec.get_period_spec();
+    let mut last_period_tick_time = None;
+    if period_spec.is_none_or(|period| {
+        let period_duration = period.get_period();
+        let execute_on_applied = period.get_execute_on_applied();
+        if period_duration > 0.0 {
+            if execute_on_applied {
+                for mod_spec in spec.get_modifier_specs() {
+                    target_attrs.apply_instant_modifier(mod_spec);
+                }
+                last_period_tick_time = Some(start_time);
+            }
+            return false;
+        }
+        true
+    }) {
+        for mod_spec in spec.get_modifier_specs() {
+            target_attrs.apply_duration_modifier(mod_spec, handle);
+        }
     }
 
-    let mut target_tag_container = context
-        .get_tag_container_mut(EffectContextEntityType::Target)
-        .expect("Target has no TagContainer");
-    target_tag_container.add_tags(spec.get_granted_tags(), tag_manager);
+    let mut target_tags = tag_container_query.get_mut(target).unwrap();
+    target_tags.add_tags(tags.get_granted_tags(), tag_manager);
 
-    let mut target_active_effects = context
-        .get_active_effects_mut(EffectContextEntityType::Target)
-        .expect("Target has no ActiveEffects");
+    let active_effect = ActiveGameplayEffect::new(handle, spec, start_time, last_period_tick_time);
 
-    target_active_effects.list.push(active_effect);
+    let mut target_asc = asc_query.get_mut(target).unwrap();
+    target_asc.add_active_effect(active_effect);
+}
+
+pub fn tick_gameplay_effects_system(
+    mut _commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(
+        Entity,
+        &mut AbilitySystemComponent,
+        &mut AttributeSet,
+        &mut GameplayTagContainer,
+    )>,
+    tag_manager: Res<GameplayTagManager>,
+) {
+    let current_time = time.elapsed_secs_f64();
+
+    for (_entity, mut asc, mut attrs, mut tags) in query.iter_mut() {
+        let active_effects = asc.get_active_effects();
+        let mut remove_handles = Vec::new();
+
+        for effect in active_effects {
+            let spec = &effect.spec;
+            if effect.is_expired(current_time) {
+                attrs.remove_modifiers(effect.get_handle());
+                tags.remove_tags(spec.get_def_tags().get_granted_tags(), &tag_manager);
+                remove_handles.push(effect.get_handle());
+                continue;
+            }
+
+            if effect.can_period_tick(current_time) {
+                for mod_spec in spec.get_modifier_specs() {
+                    attrs.apply_instant_modifier(mod_spec);
+                }
+            }
+        }
+
+        asc.remove_active_effects(&remove_handles);
+    }
 }
