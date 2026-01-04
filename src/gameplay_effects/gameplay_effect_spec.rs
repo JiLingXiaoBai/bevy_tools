@@ -54,7 +54,6 @@ pub struct GameplayEffectSpec {
     period_spec: Option<EffectPeriodSpec>,
     _stacking_type: StackingType,
     _stacking_limit: u32,
-    _level: u32,
 }
 
 impl GameplayEffectSpec {
@@ -65,7 +64,6 @@ impl GameplayEffectSpec {
         period_spec: Option<EffectPeriodSpec>,
         stacking_type: StackingType,
         stacking_limit: u32,
-        level: u32,
     ) -> Self {
         Self {
             def,
@@ -74,7 +72,6 @@ impl GameplayEffectSpec {
             period_spec,
             _stacking_type: stacking_type,
             _stacking_limit: stacking_limit,
-            _level: level,
         }
     }
 

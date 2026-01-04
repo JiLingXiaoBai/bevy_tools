@@ -1,10 +1,24 @@
-// use crate::EffectContext;
-// use crate::attributes::AttributeSet;
-// use crate::gameplay_abilities::GameplayAbility;
-use crate::gameplay_effects::{ActiveEffectHandle, ActiveGameplayEffect};
-// use crate::gameplay_tags::{GameplayTagContainer, GameplayTagManager};
+use crate::apply_gameplay_effect;
+use crate::attributes::AttributeSet;
+use crate::gameplay_abilities::GameplayAbility;
+use crate::gameplay_effects::{
+    ActiveEffectHandle, ActiveEffectHandleGenerator, ActiveGameplayEffect, EffectContext,
+};
+use crate::gameplay_tags::{GameplayTagContainer, GameplayTagManager};
+use crate::randoms::Random;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-// use std::sync::Arc;
+use std::sync::Arc;
+#[derive(SystemParam)]
+pub struct AbilitySystemParams<'w, 's> {
+    pub tag_manager: Res<'w, GameplayTagManager>,
+    pub handle_gen: ResMut<'w, ActiveEffectHandleGenerator>,
+    pub random_gen: ResMut<'w, Random>,
+    pub attr_set_query: Query<'w, 's, &'static mut AttributeSet>,
+    pub tag_container_query: Query<'w, 's, &'static mut GameplayTagContainer>,
+    pub asc_query: Query<'w, 's, &'static mut AbilitySystemComponent>,
+    pub time: Res<'w, Time>,
+}
 
 #[derive(Component, Default)]
 pub struct AbilitySystemComponent {
@@ -26,112 +40,70 @@ impl AbilitySystemComponent {
     }
 }
 
-// pub fn try_activate_ability(
-//     source_entity: Entity,
-//     target_entity: Entity,
-//     ability: &Arc<GameplayAbility>,
-//     attr_query: &mut Query<&mut AttributeSet>,
-//     asc_query: &mut Query<&mut AbilitySystemComponent>,
-//     tag_container_query: &mut Query<&mut GameplayTagContainer>,
-//     tag_manager: &Res<GameplayTagManager>,
-//     time: &Res<Time>,
-// ) -> bool {
-//     let source_tags = tag_container_query.get(source_entity).ok();
+pub fn try_activate_ability(
+    source: Entity,
+    target: Entity,
+    ability: &Arc<GameplayAbility>,
+    params: &mut AbilitySystemParams,
+) -> bool {
+    let source_tags = params.tag_container_query.get(source).ok();
+    if let Some(tags) = source_tags {
+        // 1. Check Tags (Owner Tags / Activation Tags)
+        let ability_tags = ability.get_tags();
+        if tags.has_any(ability_tags.get_activation_blocked_tags()) {
+            return false;
+        }
+        if !tags.has_all(ability_tags.get_activation_required_tags()) {
+            return false;
+        }
 
-//     if let Some(tags) = source_tags {
-//         let ability_tags = ability.get_tags();
-//         if tags.has_any(ability_tags.get_activation_blocked_tags()) {
-//             return false;
-//         }
-//         if !tags.has_all(ability_tags.get_activation_required_tags()) {
-//             return false;
-//         }
-//     }
+        // 2. Check Cooldown
+        if let Some(cooldown_def) = ability.get_cooldown()
+            && tags.has_any(cooldown_def.get_tags().get_granted_tags())
+        {
+            return false;
+        }
+    }
 
-// let effect_context = EffectContext {
-//     source: Some(source_entity),
-//     target: Some(target_entity),
-//     attr_set_query: ,
-//     tag_container_query: tag_container_query,
-//     ability_system_component_query: asc_query,
-//     level: 1,
-// };
+    if let Some(cost_def) = &ability.get_cost() {
+        // 3. Check Cost
+        let context = EffectContext {
+            source: Some(source),
+            target: Some(target),
+            attr_set_query: &params.attr_set_query.as_readonly(),
+            tag_container_query: &params.tag_container_query.as_readonly(),
+            asc_query: &params.asc_query.as_readonly(),
+            level: ability.get_level(),
+        };
 
-// if let Some(cooldown_def) = &ability.cooldown {
-//     if let Some(tags) = source_tags {
-//         // 这里简化处理：假设 Cooldown Effect 的 Granted Tags 里包含了冷却 Tag
-//         // 严谨的做法是去 Cooldown Effect 定义里找
-//         if tags.has_any(cooldown_def.get_tags().get_granted_tags()) {
-//             return false; // 还在冷却中
-//         }
-//     }
-// }
+        let cost_spec = cost_def.make_spec(&context);
+        if let Ok(attr_set) = context.attr_set_query.get(target) {
+            for cost in cost_spec.get_modifier_specs() {
+                let current_val = attr_set.get_current_value(cost.get_id()).unwrap_or(0.0);
+                if current_val + cost.get_value() < 0.0 {
+                    return false;
+                }
+            }
+        }
+    }
+    // 4. Apply Cost
+    if let Some(cost_def) = &ability.get_cost() {
+        apply_gameplay_effect(source, source, cost_def, params, ability.get_level());
+    }
 
-// // 1.3 检查消耗 (Cost)
-// // 这一步比较麻烦，需要预计算 Cost Effect 看看属性够不够减
-// if let Some(cost_def) = &ability.cost {
-//     // 创建一个临时的 Spec 来计算数值
-//     // 检查 AttributeSet 里的 Current Value 是否 >= Cost Value
-//     // (代码略，需要去 AttributeSet 里查)
-// }
+    // 5. Apply Cooldown
+    if let Some(cooldown_def) = &ability.get_cooldown() {
+        apply_gameplay_effect(source, source, cooldown_def, params, ability.get_level());
+    }
 
-// // --- 步骤 2: 提交消耗 (Commit) ---
+    // 6. TODO: Apply Ability
+    // apply_gameplay_effect(
+    //     source,
+    //     target,
+    //     ability.get_effect(),
+    //     params,
+    //     ability.get_level(),
+    // );
 
-// // 2.1 应用消耗 (Apply Cost)
-// if let Some(cost_def) = &ability.cost {
-//     apply_gameplay_effect(
-//         cost_def,
-//         source_entity,
-//         source_entity, // 消耗是应用给自己的
-//         attr_query,
-//         asc_query,
-//         tag_container_query,
-//         tag_manager,
-//         handle_gen,
-//         time,
-//         1,
-//     );
-// }
-
-// // 2.2 应用冷却 (Apply Cooldown)
-// if let Some(cooldown_def) = &ability.cooldown {
-//     apply_gameplay_effect(
-//         cooldown_def,
-//         source_entity,
-//         source_entity, // 冷却也是应用给自己的
-//         attr_query,
-//         asc_query,
-//         tag_container_query,
-//         tag_manager,
-//         handle_gen,
-//         time,
-//         1,
-//     );
-// }
-
-// // --- 步骤 3: 执行技能逻辑 (Activate) ---
-
-// println!("Ability {} Activated!", ability.name);
-
-// // 3.1 应用技能效果 (Apply Effect)
-// if let Some(effect_def) = &ability.effect {
-//     apply_gameplay_effect(
-//         effect_def,
-//         source_entity,
-//         target_entity, // 效果应用给目标
-//         attr_query,
-//         asc_query,
-//         tag_container_query,
-//         tag_manager,
-//         handle_gen,
-//         time,
-//         1,
-//     );
-// }
-
-// // 3.2 播放动画、生成投射物等
-// // 在 Bevy 中，这里通常会发送一个 Event，让其他 System 去处理表现
-// // commands.send_event(AbilityActivatedEvent { ... });
-//
-//     true
-// }
+    true
+}

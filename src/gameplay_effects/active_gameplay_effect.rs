@@ -1,11 +1,8 @@
-use super::gameplay_effect::GameplayEffect;
-use super::gameplay_effect_context::EffectContext;
+use super::gameplay_effect::{EffectContext, GameplayEffect};
 use super::gameplay_effect_spec::{EffectDurationSpec, GameplayEffectSpec};
+use crate::ability_system::{AbilitySystemComponent, AbilitySystemParams};
 use crate::attributes::AttributeSet;
-use crate::gameplay_tags::GameplayTagManager;
-use crate::randoms::Random;
-use crate::{AbilitySystemComponent, GameplayTagContainer};
-use bevy::ecs::system::SystemParam;
+use crate::gameplay_tags::{GameplayTagContainer, GameplayTagManager};
 use bevy::prelude::*;
 use std::sync::Arc;
 
@@ -93,22 +90,11 @@ impl ActiveEffectHandleGenerator {
     }
 }
 
-#[derive(SystemParam)]
-pub struct GameplayEffectParams<'w, 's> {
-    pub tag_manager: Res<'w, GameplayTagManager>,
-    pub handle_gen: ResMut<'w, ActiveEffectHandleGenerator>,
-    pub random_gen: ResMut<'w, Random>,
-    pub attr_set_query: Query<'w, 's, &'static mut AttributeSet>,
-    pub tag_container_query: Query<'w, 's, &'static mut GameplayTagContainer>,
-    pub asc_query: Query<'w, 's, &'static mut AbilitySystemComponent>,
-    pub time: Res<'w, Time>,
-}
-
 pub fn apply_gameplay_effect(
     source: Entity,
     target: Entity,
     effect_def: &Arc<GameplayEffect>,
-    params: &mut GameplayEffectParams,
+    params: &mut AbilitySystemParams,
     level: u32,
 ) {
     let probability = effect_def.get_probability_to_apply();
@@ -125,6 +111,34 @@ pub fn apply_gameplay_effect(
         return;
     }
 
+    let remove_tags = tags.get_remove_effects_with_tags();
+    if !remove_tags.is_empty()
+        && let Ok(mut target_asc_mut) = params.asc_query.get_mut(target)
+        && let Ok(mut target_tags_mut) = params.tag_container_query.get_mut(target)
+        && let Ok(mut target_attr_mut) = params.attr_set_query.get_mut(target)
+    {
+        let mut handles_to_remove = Vec::new();
+        for active_effect in target_asc_mut.get_active_effects() {
+            let effect_asset_tags = active_effect.spec.get_def_tags().get_asset_tags();
+            let mut match_found = false;
+            for tag in remove_tags {
+                if effect_asset_tags.contains(tag) {
+                    match_found = true;
+                    break;
+                }
+            }
+            if match_found {
+                target_attr_mut.remove_modifiers(active_effect.get_handle());
+                target_tags_mut.remove_tags(
+                    active_effect.spec.get_def_tags().get_granted_tags(),
+                    &params.tag_manager,
+                );
+                handles_to_remove.push(active_effect.handle);
+            }
+        }
+        target_asc_mut.remove_active_effects(&handles_to_remove);
+    }
+
     let spec = {
         let context = EffectContext {
             source: Some(source),
@@ -139,10 +153,10 @@ pub fn apply_gameplay_effect(
     };
     let duration_spec = spec.get_duration_spec();
 
-    let mut target_attrs = params.attr_set_query.get_mut(target).unwrap();
+    let mut target_attrs_mut = params.attr_set_query.get_mut(target).unwrap();
     if duration_spec.is_instant() {
         for mod_spec in spec.get_modifier_specs() {
-            target_attrs.apply_instant_modifier(mod_spec);
+            target_attrs_mut.apply_instant_modifier(mod_spec);
         }
         return;
     }
@@ -159,7 +173,7 @@ pub fn apply_gameplay_effect(
         if period_duration > 0.0 {
             if execute_on_applied {
                 for mod_spec in spec.get_modifier_specs() {
-                    target_attrs.apply_instant_modifier(mod_spec);
+                    target_attrs_mut.apply_instant_modifier(mod_spec);
                 }
                 last_period_tick_time = Some(start_time);
             }
@@ -168,7 +182,7 @@ pub fn apply_gameplay_effect(
         true
     }) {
         for mod_spec in spec.get_modifier_specs() {
-            target_attrs.apply_duration_modifier(mod_spec, handle);
+            target_attrs_mut.apply_duration_modifier(mod_spec, handle);
         }
     }
 

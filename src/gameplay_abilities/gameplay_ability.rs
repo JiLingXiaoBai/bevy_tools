@@ -34,12 +34,25 @@ impl AbilityTags {
 
 pub struct GameplayAbility {
     ability_tags: AbilityTags,
-    _cooldown: Option<Arc<GameplayEffect>>,
-    _cost: Option<Arc<GameplayEffect>>,
+    cooldown: Option<Arc<GameplayEffect>>,
+    cost: Option<Arc<GameplayEffect>>,
+    level: u32,
 }
 
 impl GameplayAbility {
     pub fn get_tags(&self) -> &AbilityTags {
         &self.ability_tags
+    }
+
+    pub fn get_cooldown(&self) -> Option<&Arc<GameplayEffect>> {
+        self.cooldown.as_ref()
+    }
+
+    pub fn get_cost(&self) -> Option<&Arc<GameplayEffect>> {
+        self.cost.as_ref()
+    }
+
+    pub fn get_level(&self) -> u32 {
+        self.level
     }
 }
