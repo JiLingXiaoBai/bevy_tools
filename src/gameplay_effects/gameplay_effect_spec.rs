@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy)]
 pub enum EffectDurationSpec {
     Instant,
-    Duration(f64),
+    Duration(u32),
     Infinite,
 }
 
@@ -25,19 +25,19 @@ impl EffectDurationSpec {
 
 #[derive(Debug, Clone, Copy)]
 pub struct EffectPeriodSpec {
-    period: f64,
+    period: u32,
     execute_on_applied: bool,
 }
 
 impl EffectPeriodSpec {
-    pub fn new(period: f64, execute_on_applied: bool) -> Self {
+    pub fn new(period: u32, execute_on_applied: bool) -> Self {
         Self {
             period,
             execute_on_applied,
         }
     }
 
-    pub fn get_period(&self) -> f64 {
+    pub fn get_period(&self) -> u32 {
         self.period
     }
 

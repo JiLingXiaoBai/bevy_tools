@@ -17,12 +17,13 @@ pub struct ActiveGameplayEffect {
 
 #[derive(Component)]
 pub struct ActiveEffectDuration {
-    timer: Timer,
+    remain_ticks: u32,
 }
 
 #[derive(Component)]
 pub struct ActiveEffectPeriod {
-    timer: Timer,
+    period_ticks: u32,
+    current_tick: u32,
 }
 
 pub fn apply_gameplay_effect(
@@ -81,10 +82,10 @@ pub fn apply_gameplay_effect(
 
     // Add Duration Component
     if let EffectDurationSpec::Duration(duration) = duration_spec
-        && *duration > 0.0
+        && *duration > 0
     {
         entity_cmds.insert(ActiveEffectDuration {
-            timer: Timer::from_seconds(*duration as f32, TimerMode::Once),
+            remain_ticks: *duration,
         });
     }
 
@@ -98,9 +99,10 @@ pub fn apply_gameplay_effect(
                 target_attrs_mut.apply_instant_modifier(mod_spec);
             }
         }
-        if period > 0.0 {
+        if period > 0 {
             entity_cmds.insert(ActiveEffectPeriod {
-                timer: Timer::from_seconds(period as f32, TimerMode::Repeating),
+                period_ticks: period,
+                current_tick: 0,
             });
         }
     }
@@ -121,15 +123,17 @@ pub fn apply_gameplay_effect(
 
 pub fn tick_effect_duration_system(
     mut commands: Commands,
-    time: Res<Time>,
     mut query: Query<(Entity, &mut ActiveEffectDuration, &ActiveGameplayEffect)>,
     mut attr_query: Query<&mut AttributeSet>,
     mut tag_query: Query<&mut GameplayTagContainer>,
     tag_manager: Res<GameplayTagManager>,
 ) {
     for (entity, mut duration, effect) in query.iter_mut() {
-        duration.timer.tick(time.delta());
-        if duration.timer.is_finished() {
+        if duration.remain_ticks > 0 {
+            duration.remain_ticks -= 1;
+        }
+
+        if duration.remain_ticks == 0 {
             // Cleanup Attributes
             if let Ok(mut attr_set) = attr_query.get_mut(effect.target) {
                 attr_set.remove_modifiers(entity);
@@ -146,17 +150,17 @@ pub fn tick_effect_duration_system(
 }
 
 pub fn tick_effect_period_system(
-    time: Res<Time>,
     mut query: Query<(&mut ActiveEffectPeriod, &ActiveGameplayEffect)>,
     mut attr_query: Query<&mut AttributeSet>,
 ) {
     for (mut period, effect) in query.iter_mut() {
-        period.timer.tick(time.delta());
-        if period.timer.is_finished()
-            && let Ok(mut attr_set) = attr_query.get_mut(effect.target)
-        {
-            for mod_spec in effect.spec.get_modifier_specs() {
-                attr_set.apply_instant_modifier(mod_spec);
+        period.current_tick += 1;
+        if period.current_tick >= period.period_ticks {
+            period.current_tick = 0;
+            if let Ok(mut attr_set) = attr_query.get_mut(effect.target) {
+                for mod_spec in effect.spec.get_modifier_specs() {
+                    attr_set.apply_instant_modifier(mod_spec);
+                }
             }
         }
     }

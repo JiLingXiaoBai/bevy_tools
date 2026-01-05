@@ -30,7 +30,7 @@ impl EffectDuration {
             EffectDuration::Duration(mm) => EffectDurationSpec::Duration(match mm {
                 ModifierMagnitude::Flat(f) => *f,
                 ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
-            }),
+            } as u32),
             EffectDuration::Infinite => EffectDurationSpec::Infinite,
         }
     }
@@ -46,7 +46,7 @@ impl EffectPeriod {
         let final_value = match &self.period {
             ModifierMagnitude::Flat(f) => *f,
             ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
-        };
+        } as u32;
         EffectPeriodSpec::new(final_value, self.execute_on_applied)
     }
 }
