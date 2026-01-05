@@ -1,4 +1,5 @@
 use super::attribute_aggregator::Aggregator;
+use super::attribute_snapshot::AttributeSnapshot;
 use crate::gameplay_effects::ActiveEffectHandle;
 use crate::modifiers::{ModifierOperation, ModifierSpec};
 #[derive(Debug, Clone)]
@@ -73,5 +74,9 @@ impl Attribute {
     pub fn reset_aggregator(&mut self) {
         self.aggregator.reset();
         self.make_dirty();
+    }
+
+    pub fn make_snapshot(&self) -> AttributeSnapshot {
+        AttributeSnapshot::new(self.base, self.current)
     }
 }

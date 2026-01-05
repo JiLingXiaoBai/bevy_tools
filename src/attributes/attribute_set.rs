@@ -83,4 +83,17 @@ impl AttributeSet {
             .flatten()
             .for_each(|attr| attr.remove_modifier_by_handle(handle));
     }
+
+    pub fn make_snapshot(&self, source_entity: Entity) -> AttributeSetSnapshot {
+        let mut new_attrs = Vec::with_capacity(self.attributes.len());
+        for attr_opt in self.attributes.iter() {
+            if let Some(attr) = attr_opt {
+                new_attrs.push(Some(Box::new(attr.make_snapshot())));
+            } else {
+                new_attrs.push(None);
+            }
+        }
+
+        AttributeSetSnapshot::new(new_attrs, source_entity)
+    }
 }

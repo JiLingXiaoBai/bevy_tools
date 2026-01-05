@@ -1,44 +1,27 @@
 use crate::apply_gameplay_effect;
-use crate::attributes::AttributeSet;
+use crate::attributes::{AttributeSet, AttributeSetSnapshot};
 use crate::gameplay_abilities::GameplayAbility;
-use crate::gameplay_effects::{
-    ActiveEffectHandle, ActiveEffectHandleGenerator, ActiveGameplayEffect, EffectContext,
-};
+use crate::gameplay_effects::EffectContext;
 use crate::gameplay_tags::{GameplayTagContainer, GameplayTagManager};
 use crate::randoms::Random;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::sync::Arc;
+
 #[derive(SystemParam)]
 pub struct AbilitySystemParams<'w, 's> {
+    pub commands: Commands<'w, 's>,
     pub tag_manager: Res<'w, GameplayTagManager>,
-    pub handle_gen: ResMut<'w, ActiveEffectHandleGenerator>,
     pub random_gen: ResMut<'w, Random>,
     pub attr_set_query: Query<'w, 's, &'static mut AttributeSet>,
     pub tag_container_query: Query<'w, 's, &'static mut GameplayTagContainer>,
     pub asc_query: Query<'w, 's, &'static mut AbilitySystemComponent>,
+    pub attr_set_snapshot_query: Query<'w, 's, &'static AttributeSetSnapshot>,
     pub time: Res<'w, Time>,
 }
 
 #[derive(Component, Default)]
-pub struct AbilitySystemComponent {
-    active_effects: Vec<ActiveGameplayEffect>,
-}
-
-impl AbilitySystemComponent {
-    pub fn get_active_effects(&self) -> &[ActiveGameplayEffect] {
-        &self.active_effects
-    }
-
-    pub fn add_active_effect(&mut self, effect: ActiveGameplayEffect) {
-        self.active_effects.push(effect);
-    }
-
-    pub fn remove_active_effects(&mut self, handle_list: &[ActiveEffectHandle]) {
-        self.active_effects
-            .retain_mut(|effect| !handle_list.contains(&effect.get_handle()));
-    }
-}
+pub struct AbilitySystemComponent;
 
 pub fn try_activate_ability(
     source: Entity,
@@ -73,11 +56,12 @@ pub fn try_activate_ability(
             attr_set_query: &params.attr_set_query.as_readonly(),
             tag_container_query: &params.tag_container_query.as_readonly(),
             asc_query: &params.asc_query.as_readonly(),
+            attr_set_snapshot: params.attr_set_snapshot_query.get(source).ok(),
             level: ability.get_level(),
         };
 
         let cost_spec = cost_def.make_spec(&context);
-        if let Ok(attr_set) = context.attr_set_query.get(target) {
+        if let Ok(attr_set) = params.attr_set_query.get(target) {
             for cost in cost_spec.get_modifier_specs() {
                 let current_val = attr_set.get_current_value(cost.get_id()).unwrap_or(0.0);
                 if current_val + cost.get_value() < 0.0 {

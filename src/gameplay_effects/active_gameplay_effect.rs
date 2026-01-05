@@ -1,93 +1,28 @@
 use super::gameplay_effect::{EffectContext, GameplayEffect};
 use super::gameplay_effect_spec::{EffectDurationSpec, GameplayEffectSpec};
-use crate::ability_system::{AbilitySystemComponent, AbilitySystemParams};
+use crate::ability_system::AbilitySystemParams;
 use crate::attributes::AttributeSet;
 use crate::gameplay_tags::{GameplayTagContainer, GameplayTagManager};
 use bevy::prelude::*;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ActiveEffectHandle(u64);
+pub type ActiveEffectHandle = Entity;
 
+#[derive(Component)]
 pub struct ActiveGameplayEffect {
-    handle: ActiveEffectHandle,
     spec: GameplayEffectSpec,
-    start_time: f64,
-    last_period_tick_time: Option<f64>,
-    _is_inhibited: bool,
+    _source: Entity,
+    target: Entity,
 }
 
-impl ActiveGameplayEffect {
-    pub fn new(
-        handle: ActiveEffectHandle,
-        spec: GameplayEffectSpec,
-        start_time: f64,
-        last_period_tick_time: Option<f64>,
-    ) -> Self {
-        Self {
-            handle,
-            spec,
-            start_time,
-            last_period_tick_time,
-            _is_inhibited: false,
-        }
-    }
-
-    pub fn is_expired(&self, current_time: f64) -> bool {
-        match *self.spec.get_duration_spec() {
-            EffectDurationSpec::Instant => true,
-            EffectDurationSpec::Duration(duration) => (current_time - self.start_time) >= duration,
-            EffectDurationSpec::Infinite => false,
-        }
-    }
-
-    pub fn get_time_remaining(&self, current_time: f64) -> Option<f64> {
-        match *self.spec.get_duration_spec() {
-            EffectDurationSpec::Instant => None,
-            EffectDurationSpec::Duration(duration) => {
-                Some(duration - (current_time - self.start_time))
-            }
-            EffectDurationSpec::Infinite => None,
-        }
-    }
-
-    pub fn get_handle(&self) -> ActiveEffectHandle {
-        self.handle
-    }
-
-    pub fn set_last_period_tick_time(&mut self, time: f64) {
-        self.last_period_tick_time = Some(time);
-    }
-
-    pub fn get_last_period_tick_time(&self) -> Option<f64> {
-        self.last_period_tick_time
-    }
-
-    pub fn can_period_tick(&self, current_time: f64) -> bool {
-        if let Some(period_spec) = &self.spec.get_period_spec()
-            && let Some(last_period_tick_time) = self.last_period_tick_time
-        {
-            let period_duration = period_spec.get_period();
-            if period_duration > 0.0 {
-                let time_since_last_tick = current_time - last_period_tick_time;
-                time_since_last_tick >= period_duration
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    }
+#[derive(Component)]
+pub struct ActiveEffectDuration {
+    timer: Timer,
 }
 
-#[derive(Resource, Default)]
-pub struct ActiveEffectHandleGenerator(pub u64);
-
-impl ActiveEffectHandleGenerator {
-    pub fn generate(&mut self) -> ActiveEffectHandle {
-        self.0 += 1;
-        ActiveEffectHandle(self.0)
-    }
+#[derive(Component)]
+pub struct ActiveEffectPeriod {
+    timer: Timer,
 }
 
 pub fn apply_gameplay_effect(
@@ -111,34 +46,6 @@ pub fn apply_gameplay_effect(
         return;
     }
 
-    let remove_tags = tags.get_remove_effects_with_tags();
-    if !remove_tags.is_empty()
-        && let Ok(mut target_asc_mut) = params.asc_query.get_mut(target)
-        && let Ok(mut target_tags_mut) = params.tag_container_query.get_mut(target)
-        && let Ok(mut target_attr_mut) = params.attr_set_query.get_mut(target)
-    {
-        let mut handles_to_remove = Vec::new();
-        for active_effect in target_asc_mut.get_active_effects() {
-            let effect_asset_tags = active_effect.spec.get_def_tags().get_asset_tags();
-            let mut match_found = false;
-            for tag in remove_tags {
-                if effect_asset_tags.contains(tag) {
-                    match_found = true;
-                    break;
-                }
-            }
-            if match_found {
-                target_attr_mut.remove_modifiers(active_effect.get_handle());
-                target_tags_mut.remove_tags(
-                    active_effect.spec.get_def_tags().get_granted_tags(),
-                    &params.tag_manager,
-                );
-                handles_to_remove.push(active_effect.handle);
-            }
-        }
-        target_asc_mut.remove_active_effects(&handles_to_remove);
-    }
-
     let spec = {
         let context = EffectContext {
             source: Some(source),
@@ -146,6 +53,7 @@ pub fn apply_gameplay_effect(
             attr_set_query: &params.attr_set_query.as_readonly(),
             tag_container_query: &params.tag_container_query.as_readonly(),
             asc_query: &params.asc_query.as_readonly(),
+            attr_set_snapshot: params.attr_set_snapshot_query.get(source).ok(),
             level,
         };
 
@@ -153,79 +61,103 @@ pub fn apply_gameplay_effect(
     };
     let duration_spec = spec.get_duration_spec();
 
-    let mut target_attrs_mut = params.attr_set_query.get_mut(target).unwrap();
+    // Instant Effect
     if duration_spec.is_instant() {
+        let mut target_attrs_mut = params.attr_set_query.get_mut(target).unwrap();
         for mod_spec in spec.get_modifier_specs() {
             target_attrs_mut.apply_instant_modifier(mod_spec);
         }
         return;
     }
 
-    // TODO: Stacking Logic, Inhibited Logic
+    // Duration Effect -> Spawn Entity
+    let mut entity_cmds = params.commands.spawn(ActiveGameplayEffect {
+        _source: source,
+        target,
+        spec: spec.clone(),
+    });
 
-    let start_time = params.time.elapsed_secs_f64();
-    let handle = params.handle_gen.generate();
-    let period_spec = spec.get_period_spec();
-    let mut last_period_tick_time = None;
-    if period_spec.is_none_or(|period| {
-        let period_duration = period.get_period();
-        let execute_on_applied = period.get_execute_on_applied();
-        if period_duration > 0.0 {
-            if execute_on_applied {
-                for mod_spec in spec.get_modifier_specs() {
-                    target_attrs_mut.apply_instant_modifier(mod_spec);
-                }
-                last_period_tick_time = Some(start_time);
+    let effect_entity = entity_cmds.id();
+
+    // Add Duration Component
+    if let EffectDurationSpec::Duration(duration) = duration_spec
+        && *duration > 0.0
+    {
+        entity_cmds.insert(ActiveEffectDuration {
+            timer: Timer::from_seconds(*duration as f32, TimerMode::Once),
+        });
+    }
+
+    // Add Period Component
+    if let Some(period_spec) = spec.get_period_spec() {
+        let period = period_spec.get_period();
+        let execute_on_application = period_spec.get_execute_on_applied();
+        if execute_on_application {
+            let mut target_attrs_mut = params.attr_set_query.get_mut(target).unwrap();
+            for mod_spec in spec.get_modifier_specs() {
+                target_attrs_mut.apply_instant_modifier(mod_spec);
             }
-            return false;
         }
-        true
-    }) {
-        for mod_spec in spec.get_modifier_specs() {
-            target_attrs_mut.apply_duration_modifier(mod_spec, handle);
+        if period > 0.0 {
+            entity_cmds.insert(ActiveEffectPeriod {
+                timer: Timer::from_seconds(period as f32, TimerMode::Repeating),
+            });
         }
     }
 
+    // Set Parent
+    entity_cmds.set_parent_in_place(target);
+
+    // Apply Modifiers to AttributeSet (using Entity ID)
+    let mut target_attrs_mut = params.attr_set_query.get_mut(target).unwrap();
+    for mod_spec in spec.get_modifier_specs() {
+        target_attrs_mut.apply_duration_modifier(mod_spec, effect_entity);
+    }
+
+    // Add Tags
     let mut target_tags = params.tag_container_query.get_mut(target).unwrap();
     target_tags.add_tags(tags.get_granted_tags(), &params.tag_manager);
-
-    let active_effect = ActiveGameplayEffect::new(handle, spec, start_time, last_period_tick_time);
-
-    let mut target_asc = params.asc_query.get_mut(target).unwrap();
-    target_asc.add_active_effect(active_effect);
 }
 
-pub fn tick_gameplay_effects_system(
+pub fn tick_effect_duration_system(
+    mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(
-        &mut AbilitySystemComponent,
-        &mut AttributeSet,
-        &mut GameplayTagContainer,
-    )>,
+    mut query: Query<(Entity, &mut ActiveEffectDuration, &ActiveGameplayEffect)>,
+    mut attr_query: Query<&mut AttributeSet>,
+    mut tag_query: Query<&mut GameplayTagContainer>,
     tag_manager: Res<GameplayTagManager>,
 ) {
-    let current_time = time.elapsed_secs_f64();
-
-    for (mut asc, mut attrs, mut tags) in query.iter_mut() {
-        let active_effects = asc.get_active_effects();
-        let mut remove_handles = Vec::new();
-
-        for effect in active_effects {
-            let spec = &effect.spec;
-            if effect.is_expired(current_time) {
-                attrs.remove_modifiers(effect.get_handle());
-                tags.remove_tags(spec.get_def_tags().get_granted_tags(), &tag_manager);
-                remove_handles.push(effect.get_handle());
-                continue;
+    for (entity, mut duration, effect) in query.iter_mut() {
+        duration.timer.tick(time.delta());
+        if duration.timer.is_finished() {
+            // Cleanup Attributes
+            if let Ok(mut attr_set) = attr_query.get_mut(effect.target) {
+                attr_set.remove_modifiers(entity);
             }
+            // Cleanup Tags
+            if let Ok(mut tag_container) = tag_query.get_mut(effect.target) {
+                tag_container
+                    .remove_tags(effect.spec.get_def_tags().get_granted_tags(), &tag_manager);
+            }
+            // Despawn
+            commands.entity(entity).despawn();
+        }
+    }
+}
 
-            if effect.can_period_tick(current_time) {
-                for mod_spec in spec.get_modifier_specs() {
-                    attrs.apply_instant_modifier(mod_spec);
-                }
+pub fn tick_effect_period_system(
+    time: Res<Time>,
+    mut query: Query<(&mut ActiveEffectPeriod, &ActiveGameplayEffect)>,
+    mut attr_query: Query<&mut AttributeSet>,
+) {
+    for (mut period, effect) in query.iter_mut() {
+        period.timer.tick(time.delta());
+        if period.timer.is_finished()
+            && let Ok(mut attr_set) = attr_query.get_mut(effect.target)
+        {
+            for mod_spec in effect.spec.get_modifier_specs() {
+                attr_set.apply_instant_modifier(mod_spec);
             }
         }
-
-        asc.remove_active_effects(&remove_handles);
     }
 }

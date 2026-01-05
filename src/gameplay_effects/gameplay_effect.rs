@@ -1,18 +1,19 @@
 use super::gameplay_effect_spec::{EffectDurationSpec, EffectPeriodSpec, GameplayEffectSpec};
 use crate::ability_system::AbilitySystemComponent;
-use crate::attributes::AttributeSet;
+use crate::attributes::{AttributeSet, AttributeSetSnapshot};
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer};
 use crate::modifiers::{Modifier, ModifierMagnitude};
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::Query;
 use std::sync::Arc;
 
-pub struct EffectContext<'a, 'w, 's> {
+pub struct EffectContext<'w, 's> {
     pub source: Option<Entity>,
     pub target: Option<Entity>,
-    pub attr_set_query: &'a Query<'w, 's, &'static AttributeSet>,
-    pub tag_container_query: &'a Query<'w, 's, &'static GameplayTagContainer>,
-    pub asc_query: &'a Query<'w, 's, &'static AbilitySystemComponent>,
+    pub attr_set_query: &'w Query<'w, 's, &'static AttributeSet>,
+    pub tag_container_query: &'w Query<'w, 's, &'static GameplayTagContainer>,
+    pub asc_query: &'w Query<'w, 's, &'static AbilitySystemComponent>,
+    pub attr_set_snapshot: Option<&'w AttributeSetSnapshot>,
     pub level: u32,
 }
 
