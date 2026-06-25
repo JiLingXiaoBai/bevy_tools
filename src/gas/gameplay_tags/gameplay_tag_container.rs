@@ -1,6 +1,5 @@
 use super::*;
 use bevy::prelude::{Component, Res};
-use bevy::render::render_resource::encase::private::RuntimeSizedArray;
 
 pub const BLOCK_SIZE_EXPONENT: usize = 6; // 2^6 =64
 pub const TAG_BITS_PER_BLOCK: usize = 64;

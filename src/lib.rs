@@ -1,24 +1,8 @@
-mod ability_system;
-mod attributes;
-mod gameplay_abilities;
-mod gameplay_effects;
-mod gameplay_tags;
-mod modifiers;
-mod randoms;
-mod settings;
-mod unique_names;
+mod gas;
 
-pub use ability_system::*;
-pub use attributes::*;
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
-pub use gameplay_abilities::*;
-pub use gameplay_effects::*;
-pub use gameplay_tags::*;
-pub use modifiers::*;
-pub use randoms::*;
-pub use settings::*;
-pub use unique_names::*;
+pub use gas::*;
 extern crate core;
 
 pub struct GameplayTagPlugin;
@@ -36,6 +20,14 @@ impl Plugin for UniqueNamePlugin {
         app.init_resource::<UniqueNamePool>();
     }
 }
+pub struct RandomPlugin;
+
+impl Plugin for RandomPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<Random>();
+    }
+}
+
 pub struct GameplayTagBundlePlugin;
 
 impl PluginGroup for GameplayTagBundlePlugin {
@@ -43,5 +35,6 @@ impl PluginGroup for GameplayTagBundlePlugin {
         PluginGroupBuilder::start::<Self>()
             .add(UniqueNamePlugin)
             .add(GameplayTagPlugin)
+            .add(RandomPlugin)
     }
 }
