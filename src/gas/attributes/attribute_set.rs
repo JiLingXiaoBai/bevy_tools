@@ -97,3 +97,9 @@ impl AttributeSet {
         AttributeSetSnapshot::new(new_attrs, source_entity)
     }
 }
+
+pub fn recalculate_attribute_sets_system(mut query: Query<&mut AttributeSet>) {
+    for mut attr_set in query.iter_mut() {
+        attr_set.recalculate_all();
+    }
+}

@@ -54,8 +54,8 @@ impl EffectPeriod {
 #[derive(Debug, Clone, Copy)]
 pub enum StackingType {
     None,
-    Aggregate,
-    Override,
+    AggregateBySource,
+    AggregateByTarget,
 }
 
 pub struct EffectTags {

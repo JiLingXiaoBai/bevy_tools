@@ -75,6 +75,10 @@ impl GameplayEffectSpec {
         }
     }
 
+    pub fn is_same_def(&self, other: &GameplayEffectSpec) -> bool {
+        Arc::ptr_eq(&self.def, &other.def)
+    }
+
     pub fn get_def_tags(&self) -> &EffectTags {
         self.def.get_tags()
     }

@@ -24,11 +24,27 @@ impl Plugin for UniqueNamePlugin {
         app.init_resource::<UniqueNamePool>();
     }
 }
+
 pub struct RandomPlugin;
 
 impl Plugin for RandomPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Random>();
+    }
+}
+
+pub struct GameplayAbilitySystemPlugin;
+
+impl Plugin for GameplayAbilitySystemPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<AttributeIdManager>().add_systems(
+            Update,
+            (
+                (tick_effect_duration_system, tick_effect_period_system),
+                recalculate_attribute_sets_system,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -40,5 +56,6 @@ impl PluginGroup for GameplayTagBundlePlugin {
             .add(UniqueNamePlugin)
             .add(GameplayTagPlugin)
             .add(RandomPlugin)
+            .add(GameplayAbilitySystemPlugin)
     }
 }

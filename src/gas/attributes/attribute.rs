@@ -58,7 +58,6 @@ impl Attribute {
     pub fn remove_modifier_by_handle(&mut self, handle: ActiveEffectHandle) {
         self.aggregator.remove_modifier_by_handle(handle);
         self.make_dirty();
-        self.recalculate();
     }
 
     pub fn modify_base_value(&mut self, spec: &ModifierSpec) {
