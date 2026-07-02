@@ -1,4 +1,3 @@
-use crate::apply_gameplay_effect;
 use crate::attributes::{AttributeSet, AttributeSetSnapshot};
 use crate::gameplay_abilities::{
     AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle, ActiveGameplayAbility,
@@ -9,6 +8,7 @@ use crate::gameplay_effects::{
 };
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
 use crate::randoms::Random;
+use crate::{apply_gameplay_effect, execute_gameplay_effect_plan, prepare_gameplay_effect};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ pub struct AbilitySystemParams<'w, 's> {
             Option<&'static mut ActiveEffectPeriod>,
         ),
     >,
-    pub active_ability_query: Query<'w, 's, (Entity, &'static ActiveGameplayAbility)>,
+    pub active_ability_query: Query<'w, 's, (Entity, &'static mut ActiveGameplayAbility)>,
     pub time: Res<'w, Time>,
 }
 
@@ -227,11 +227,20 @@ pub fn try_activate_ability_by_handle(
     }
 
     for effect in ability.get_activation_effects() {
-        apply_gameplay_effect(source, target, effect, params, level);
+        // Activation effects are best-effort; cost/cooldown commit already decided activation success.
+        let _ = apply_gameplay_effect(source, target, effect, params, level);
     }
 
     if ability.should_end_on_activation() {
-        end_ability(source, active_handle, params);
+        params
+            .commands
+            .entity(active_handle)
+            .insert(ActiveGameplayAbility::new(
+                source,
+                handle,
+                target,
+                AbilityActivationStatus::Ending,
+            ));
     }
 
     true
@@ -305,14 +314,33 @@ pub fn commit_ability(
     level: u32,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    if let Some(cost_def) = ability.get_cost()
-        && !apply_gameplay_effect(source, source, cost_def, params, level)
+    let cost_plan = if let Some(cost_def) = ability.get_cost() {
+        let Some(plan) = prepare_gameplay_effect(source, source, cost_def, params, level) else {
+            return false;
+        };
+        Some(plan)
+    } else {
+        None
+    };
+
+    let cooldown_plan = if let Some(cooldown_def) = ability.get_cooldown() {
+        let Some(plan) = prepare_gameplay_effect(source, source, cooldown_def, params, level)
+        else {
+            return false;
+        };
+        Some(plan)
+    } else {
+        None
+    };
+
+    if let Some(plan) = cost_plan
+        && !execute_gameplay_effect_plan(plan, params)
     {
         return false;
     }
 
-    if let Some(cooldown_def) = ability.get_cooldown()
-        && !apply_gameplay_effect(source, source, cooldown_def, params, level)
+    if let Some(plan) = cooldown_plan
+        && !execute_gameplay_effect_plan(plan, params)
     {
         return false;
     }
@@ -323,26 +351,39 @@ pub fn commit_ability(
 fn finish_ability_with_status(
     source: Entity,
     active_handle: ActiveAbilityHandle,
-    _status: AbilityActivationStatus,
+    status: AbilityActivationStatus,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    let Ok((_, active_ability)) = params.active_ability_query.get(active_handle) else {
+    let Ok((_, mut active_ability)) = params.active_ability_query.get_mut(active_handle) else {
         return false;
     };
     if active_ability.get_source() != source {
         return false;
     }
-    let active_ability = active_ability.clone();
+    active_ability.set_status(status);
+    true
+}
 
-    let Ok(mut asc) = params.asc_query.get_mut(source) else {
-        return false;
-    };
-    asc.finish_active_ability(
-        active_handle,
-        &active_ability,
-        &mut params.commands,
-        &params.tag_manager,
-    )
+pub fn cleanup_finished_abilities_system(
+    mut commands: Commands,
+    active_ability_query: Query<(Entity, &ActiveGameplayAbility)>,
+    mut asc_query: Query<&mut AbilitySystemComponent>,
+    tag_manager: Res<GameplayTagManager>,
+) {
+    for (active_handle, active_ability) in active_ability_query.iter() {
+        if !matches!(
+            active_ability.get_status(),
+            AbilityActivationStatus::Ending | AbilityActivationStatus::Cancelled
+        ) {
+            continue;
+        }
+
+        if let Ok(mut asc) = asc_query.get_mut(active_ability.get_source()) {
+            asc.finish_active_ability(active_handle, active_ability, &mut commands, &tag_manager);
+        } else {
+            commands.entity(active_handle).despawn();
+        }
+    }
 }
 
 fn cancel_active_abilities_with_tags(

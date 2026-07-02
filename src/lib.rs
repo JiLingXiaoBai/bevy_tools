@@ -38,9 +38,11 @@ pub struct GameplayAbilitySystemPlugin;
 impl Plugin for GameplayAbilitySystemPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AttributeIdManager>().add_systems(
-            Update,
+            FixedUpdate,
             (
+                update_active_effect_tag_requirements_system,
                 (tick_effect_duration_system, tick_effect_period_system),
+                cleanup_finished_abilities_system,
                 recalculate_attribute_sets_system,
             )
                 .chain(),
