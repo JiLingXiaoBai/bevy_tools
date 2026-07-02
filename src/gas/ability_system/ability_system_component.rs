@@ -61,7 +61,7 @@ pub fn try_activate_ability(
         };
 
         let cost_spec = cost_def.make_spec(&context);
-        if let Ok(attr_set) = params.attr_set_query.get(target) {
+        if let Ok(attr_set) = params.attr_set_query.get(source) {
             for cost in cost_spec.get_modifier_specs() {
                 let current_val = attr_set.get_current_value(cost.get_id()).unwrap_or(0.0);
                 if current_val + cost.get_value() < 0.0 {
