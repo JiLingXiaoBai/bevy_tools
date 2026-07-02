@@ -4,7 +4,9 @@ use crate::gameplay_abilities::{
     AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle, ActiveGameplayAbility,
     GameplayAbility, GameplayAbilitySpec,
 };
-use crate::gameplay_effects::{ActiveGameplayEffect, EffectContext};
+use crate::gameplay_effects::{
+    ActiveEffectDuration, ActiveEffectPeriod, ActiveGameplayEffect, EffectContext,
+};
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
 use crate::randoms::Random;
 use bevy::ecs::system::SystemParam;
@@ -20,7 +22,16 @@ pub struct AbilitySystemParams<'w, 's> {
     pub tag_container_query: Query<'w, 's, &'static mut GameplayTagContainer>,
     pub asc_query: Query<'w, 's, &'static mut AbilitySystemComponent>,
     pub attr_set_snapshot_query: Query<'w, 's, &'static AttributeSetSnapshot>,
-    pub active_effect_query: Query<'w, 's, (Entity, &'static ActiveGameplayEffect)>,
+    pub active_effect_query: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static mut ActiveGameplayEffect,
+            Option<&'static mut ActiveEffectDuration>,
+            Option<&'static mut ActiveEffectPeriod>,
+        ),
+    >,
     pub active_ability_query: Query<'w, 's, (Entity, &'static ActiveGameplayAbility)>,
     pub time: Res<'w, Time>,
 }

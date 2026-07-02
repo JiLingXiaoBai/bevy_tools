@@ -62,6 +62,14 @@ impl ModifierSpec {
     pub fn get_value(&self) -> f64 {
         self.value
     }
+
+    pub fn scaled_by_stack(&self, stack_count: u32) -> Self {
+        Self {
+            id: self.id,
+            op: self.op,
+            value: self.value * stack_count as f64,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
