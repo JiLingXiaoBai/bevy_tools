@@ -7,7 +7,7 @@ use bevy::prelude::ResMut;
 pub struct GameplayTag(u16);
 
 impl GameplayTag {
-    pub fn new(tag_bit_index: u16) -> Self {
+    pub(crate) fn new(tag_bit_index: u16) -> Self {
         Self(tag_bit_index)
     }
     pub fn get_bit_index_u16(&self) -> u16 {

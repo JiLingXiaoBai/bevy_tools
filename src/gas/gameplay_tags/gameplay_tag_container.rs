@@ -67,13 +67,8 @@ impl GameplayTagContainer {
     }
     /// Removes a tag, decrementing reference counts. Clears the bit only if the count drops to zero.
     pub fn remove_tag(&mut self, tag: &GameplayTag, manager: &Res<GameplayTagManager>) {
-        // Only proceed if the tag was explicitly present (count > 0 for this exact tag)
         let tag_bit_index = tag.get_bit_index_usize();
         if tag_bit_index < self.ref_counts.len() && self.ref_counts[tag_bit_index] > 0 {
-            if manager.check_has_active_descendants(tag_bit_index, &self.ref_counts) {
-                return;
-            }
-
             if let Some(inherited_bits) = manager.get_inherited_bits(tag) {
                 // 1. Update Reference Counts and track which bits need to be cleared
                 let mut bits_to_clear = [0u64; MAX_TAG_BLOCKS];

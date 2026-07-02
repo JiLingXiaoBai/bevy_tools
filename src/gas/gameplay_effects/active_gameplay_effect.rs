@@ -54,21 +54,21 @@ pub fn apply_gameplay_effect(
     effect_def: &Arc<GameplayEffect>,
     params: &mut AbilitySystemParams,
     level: u32,
-) {
+) -> bool {
     let probability = effect_def.get_probability_to_apply();
     if probability < 1.0 && !params.random_gen.random_bool(probability) {
-        return;
+        return false;
     }
 
     let tags = effect_def.get_tags();
 
     let Ok(target_tags) = params.tag_container_query.get(target) else {
-        return;
+        return false;
     };
     if !target_tags.has_all(tags.get_required_tags())
         || target_tags.has_any(tags.get_blocked_tags())
     {
-        return;
+        return false;
     }
 
     let spec = {
@@ -85,12 +85,38 @@ pub fn apply_gameplay_effect(
         effect_def.make_spec(&context)
     };
 
+    let duration_spec = spec.get_duration_spec();
+    if matches!(duration_spec, EffectDurationSpec::Duration(0)) {
+        return false;
+    }
+
+    let needs_attribute_set = duration_spec.is_instant()
+        || spec.get_period_spec().is_none()
+        || spec
+            .get_period_spec()
+            .as_ref()
+            .is_some_and(|period| period.get_execute_on_applied() || period.get_period() > 0);
+    if needs_attribute_set && params.attr_set_query.get(target).is_err() {
+        return false;
+    }
+
     let ignored_handles = collect_active_effects_with_tags(
         target,
         tags.get_remove_effects_with_tags(),
         &params.active_effect_query,
         &params.tag_manager,
     );
+
+    if !can_apply_stacking_policy(
+        source,
+        target,
+        &spec,
+        &params.active_effect_query,
+        &ignored_handles,
+    ) {
+        return false;
+    }
+
     remove_collected_active_effects(
         &ignored_handles,
         &params.active_effect_query,
@@ -100,26 +126,14 @@ pub fn apply_gameplay_effect(
         &params.tag_manager,
     );
 
-    let duration_spec = spec.get_duration_spec();
-
     if duration_spec.is_instant() {
         let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(target) else {
-            return;
+            return false;
         };
         for mod_spec in spec.get_modifier_specs() {
             target_attrs_mut.apply_instant_modifier(mod_spec);
         }
-        return;
-    }
-
-    if !can_apply_stacking_policy(
-        source,
-        target,
-        &spec,
-        &params.active_effect_query,
-        &ignored_handles,
-    ) {
-        return;
+        return true;
     }
 
     let mut entity_cmds =
@@ -129,9 +143,7 @@ pub fn apply_gameplay_effect(
 
     let effect_entity = entity_cmds.id();
 
-    if let EffectDurationSpec::Duration(duration) = duration_spec
-        && *duration > 0
-    {
+    if let EffectDurationSpec::Duration(duration) = duration_spec {
         entity_cmds.insert(ActiveEffectDuration {
             remain_ticks: *duration,
         });
@@ -142,7 +154,8 @@ pub fn apply_gameplay_effect(
         let execute_on_application = period_spec.get_execute_on_applied();
         if execute_on_application {
             let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(target) else {
-                return;
+                params.commands.entity(effect_entity).despawn();
+                return false;
             };
             for mod_spec in spec.get_modifier_specs() {
                 target_attrs_mut.apply_instant_modifier(mod_spec);
@@ -156,7 +169,8 @@ pub fn apply_gameplay_effect(
         }
     } else {
         let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(target) else {
-            return;
+            params.commands.entity(effect_entity).despawn();
+            return false;
         };
         for mod_spec in spec.get_modifier_specs() {
             target_attrs_mut.apply_duration_modifier(mod_spec, effect_entity);
@@ -166,11 +180,13 @@ pub fn apply_gameplay_effect(
     entity_cmds.set_parent_in_place(target);
 
     let Ok(mut target_tags) = params.tag_container_query.get_mut(target) else {
-        return;
+        params.commands.entity(effect_entity).despawn();
+        return false;
     };
     target_tags.add_tags(tags.get_granted_tags(), &params.tag_manager);
-}
 
+    true
+}
 pub fn remove_active_effect(
     handle: ActiveEffectHandle,
     commands: &mut Commands,

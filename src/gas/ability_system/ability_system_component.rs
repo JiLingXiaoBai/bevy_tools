@@ -119,7 +119,21 @@ impl AbilitySystemComponent {
         commands: &mut Commands,
         tag_manager: &Res<GameplayTagManager>,
     ) -> bool {
-        let spec_handle = active_ability.get_spec_handle();
+        self.rollback_started_ability(
+            active_handle,
+            active_ability.get_spec_handle(),
+            commands,
+            tag_manager,
+        )
+    }
+
+    fn rollback_started_ability(
+        &mut self,
+        active_handle: ActiveAbilityHandle,
+        spec_handle: AbilitySpecHandle,
+        commands: &mut Commands,
+        tag_manager: &Res<GameplayTagManager>,
+    ) -> bool {
         let blocked_tags = self
             .find_ability_spec(spec_handle)
             .map(|spec| {
@@ -189,7 +203,17 @@ pub fn try_activate_ability_by_handle(
         )
     };
 
-    commit_ability(source, target, &ability, level, params);
+    if !commit_ability(source, target, &ability, level, params) {
+        if let Ok(mut asc) = params.asc_query.get_mut(source) {
+            asc.rollback_started_ability(
+                active_handle,
+                handle,
+                &mut params.commands,
+                &params.tag_manager,
+            );
+        }
+        return false;
+    }
 
     for effect in ability.get_activation_effects() {
         apply_gameplay_effect(source, target, effect, params, level);
@@ -269,14 +293,20 @@ pub fn commit_ability(
     ability: &Arc<GameplayAbility>,
     level: u32,
     params: &mut AbilitySystemParams,
-) {
-    if let Some(cost_def) = ability.get_cost() {
-        apply_gameplay_effect(source, source, cost_def, params, level);
+) -> bool {
+    if let Some(cost_def) = ability.get_cost()
+        && !apply_gameplay_effect(source, source, cost_def, params, level)
+    {
+        return false;
     }
 
-    if let Some(cooldown_def) = ability.get_cooldown() {
-        apply_gameplay_effect(source, source, cooldown_def, params, level);
+    if let Some(cooldown_def) = ability.get_cooldown()
+        && !apply_gameplay_effect(source, source, cooldown_def, params, level)
+    {
+        return false;
     }
+
+    true
 }
 
 fn finish_ability_with_status(
@@ -357,13 +387,17 @@ fn can_pay_ability_cost(
         level,
     };
 
+    let Ok(attr_set) = params.attr_set_query.get(source) else {
+        return false;
+    };
+
     let cost_spec = cost_def.make_spec(&context);
-    if let Ok(attr_set) = params.attr_set_query.get(source) {
-        for cost in cost_spec.get_modifier_specs() {
-            let current_val = attr_set.get_current_value(cost.get_id()).unwrap_or(0.0);
-            if current_val + cost.get_value() < 0.0 {
-                return false;
-            }
+    for cost in cost_spec.get_modifier_specs() {
+        let Some(current_val) = attr_set.get_current_value(cost.get_id()) else {
+            return false;
+        };
+        if current_val + cost.get_value() < 0.0 {
+            return false;
         }
     }
 

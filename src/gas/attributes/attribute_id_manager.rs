@@ -8,7 +8,7 @@ use bevy::prelude::{ResMut, Resource};
 pub struct AttributeId(u16);
 
 impl AttributeId {
-    pub fn new(index: u16) -> Self {
+    pub(crate) fn new(index: u16) -> Self {
         Self(index)
     }
     pub fn to_index(self) -> usize {

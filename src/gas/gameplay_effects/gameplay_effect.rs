@@ -27,10 +27,12 @@ impl EffectDuration {
     pub fn make_spec(&self, context: &EffectContext) -> EffectDurationSpec {
         match self {
             EffectDuration::Instant => EffectDurationSpec::Instant,
-            EffectDuration::Duration(mm) => EffectDurationSpec::Duration(match mm {
-                ModifierMagnitude::Flat(f) => *f,
-                ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
-            } as u32),
+            EffectDuration::Duration(mm) => {
+                EffectDurationSpec::Duration(magnitude_to_ticks(match mm {
+                    ModifierMagnitude::Flat(f) => *f,
+                    ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
+                }))
+            }
             EffectDuration::Infinite => EffectDurationSpec::Infinite,
         }
     }
@@ -42,11 +44,19 @@ pub struct EffectPeriod {
 }
 
 impl EffectPeriod {
+    pub fn new(period: ModifierMagnitude, execute_on_applied: bool) -> Self {
+        Self {
+            period,
+            execute_on_applied,
+        }
+    }
+
     pub fn make_spec(&self, context: &EffectContext) -> EffectPeriodSpec {
         let final_value = match &self.period {
             ModifierMagnitude::Flat(f) => *f,
             ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
-        } as u32;
+        };
+        let final_value = magnitude_to_ticks(final_value);
         EffectPeriodSpec::new(final_value, self.execute_on_applied)
     }
 }
@@ -67,6 +77,22 @@ pub struct EffectTags {
 }
 
 impl EffectTags {
+    pub fn new(
+        asset_tags: Vec<GameplayTag>,
+        granted_tags: Vec<GameplayTag>,
+        required_tags: Vec<GameplayTag>,
+        blocked_tags: Vec<GameplayTag>,
+        remove_effects_with_tags: Vec<GameplayTag>,
+    ) -> Self {
+        Self {
+            asset_tags,
+            granted_tags,
+            required_tags,
+            blocked_tags,
+            remove_effects_with_tags,
+        }
+    }
+
     pub fn get_asset_tags(&self) -> &[GameplayTag] {
         &self.asset_tags
     }
@@ -100,6 +126,26 @@ pub struct GameplayEffect {
 }
 
 impl GameplayEffect {
+    pub fn new(
+        modifiers: Vec<Modifier>,
+        duration: EffectDuration,
+        period: Option<EffectPeriod>,
+        probability_to_apply: f64,
+        stacking_type: StackingType,
+        stacking_limit: u32,
+        tags: EffectTags,
+    ) -> Self {
+        Self {
+            modifiers,
+            duration,
+            period,
+            probability_to_apply,
+            stacking_type,
+            stacking_limit,
+            tags,
+        }
+    }
+
     pub fn make_spec(self: &Arc<Self>, context: &EffectContext) -> GameplayEffectSpec {
         GameplayEffectSpec::new(
             self.clone(),
@@ -120,5 +166,15 @@ impl GameplayEffect {
 
     pub fn get_probability_to_apply(&self) -> f64 {
         self.probability_to_apply
+    }
+}
+
+fn magnitude_to_ticks(value: f64) -> u32 {
+    if !value.is_finite() || value <= 0.0 {
+        0
+    } else if value >= u32::MAX as f64 {
+        u32::MAX
+    } else {
+        value.ceil() as u32
     }
 }
