@@ -165,28 +165,8 @@ pub struct EffectTags {
 }
 
 impl EffectTags {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        asset_tags: Vec<GameplayTag>,
-        granted_tags: Vec<GameplayTag>,
-        required_tags: Vec<GameplayTag>,
-        blocked_tags: Vec<GameplayTag>,
-        remove_effects_with_tags: Vec<GameplayTag>,
-    ) -> Self {
-        Self::new_with_requirements(
-            asset_tags,
-            granted_tags,
-            TagRequirements::default(),
-            TagRequirements::new(required_tags, blocked_tags),
-            TagRequirements::default(),
-            TagRequirements::default(),
-            TagRequirements::default(),
-            TagRequirements::default(),
-            Vec::new(),
-            remove_effects_with_tags,
-        )
-    }
-
-    pub fn new_with_requirements(
         asset_tags: Vec<GameplayTag>,
         granted_tags: Vec<GameplayTag>,
         source_application_tags: TagRequirements,

@@ -68,32 +68,33 @@ impl GameplayTagContainer {
     /// Removes a tag, decrementing reference counts. Clears the bit only if the count drops to zero.
     pub fn remove_tag(&mut self, tag: &GameplayTag, manager: &Res<GameplayTagManager>) {
         let tag_bit_index = tag.get_bit_index_usize();
-        if tag_bit_index < self.ref_counts.len() && self.ref_counts[tag_bit_index] > 0 {
-            if let Some(inherited_bits) = manager.get_inherited_bits(tag) {
-                // 1. Update Reference Counts and track which bits need to be cleared
-                let mut bits_to_clear = [0u64; MAX_TAG_BLOCKS];
-                for (block_index, &block_bits) in inherited_bits.iter().enumerate() {
-                    let base_index = (block_index * TAG_BITS_PER_BLOCK) as u16;
-                    let mut current_block = block_bits;
+        if tag_bit_index < self.ref_counts.len()
+            && self.ref_counts[tag_bit_index] > 0
+            && let Some(inherited_bits) = manager.get_inherited_bits(tag)
+        {
+            // 1. Update Reference Counts and track which bits need to be cleared
+            let mut bits_to_clear = [0u64; MAX_TAG_BLOCKS];
+            for (block_index, &block_bits) in inherited_bits.iter().enumerate() {
+                let base_index = (block_index * TAG_BITS_PER_BLOCK) as u16;
+                let mut current_block = block_bits;
 
-                    while current_block != 0 {
-                        let lsb = current_block & current_block.wrapping_neg();
-                        let bit_offset = lsb.trailing_zeros();
-                        let index_usize = base_index as usize + bit_offset as usize;
-                        debug_assert!(index_usize < self.ref_counts.len());
-                        let cnt = &mut self.ref_counts[index_usize];
-                        *cnt = cnt.saturating_sub(1);
-                        if *cnt == 0 {
-                            bits_to_clear[block_index] |= lsb;
-                        }
-                        current_block ^= lsb;
+                while current_block != 0 {
+                    let lsb = current_block & current_block.wrapping_neg();
+                    let bit_offset = lsb.trailing_zeros();
+                    let index_usize = base_index as usize + bit_offset as usize;
+                    debug_assert!(index_usize < self.ref_counts.len());
+                    let cnt = &mut self.ref_counts[index_usize];
+                    *cnt = cnt.saturating_sub(1);
+                    if *cnt == 0 {
+                        bits_to_clear[block_index] |= lsb;
                     }
+                    current_block ^= lsb;
                 }
+            }
 
-                // 2. Update Bitset (AND NOT operation based on zero counts)
-                for (dst, clear) in &mut self.tag_bits.iter_mut().zip(bits_to_clear) {
-                    *dst &= !clear;
-                }
+            // 2. Update Bitset (AND NOT operation based on zero counts)
+            for (dst, clear) in &mut self.tag_bits.iter_mut().zip(bits_to_clear) {
+                *dst &= !clear;
             }
         }
     }

@@ -550,10 +550,10 @@ fn passes_application_requirements(
 
     incoming_tags
         .get_source_application_tags()
-        .passes(source_tags.as_deref())
+        .passes(source_tags)
         && incoming_tags
             .get_target_application_tags()
-            .passes(target_tags.as_deref())
+            .passes(target_tags)
 }
 
 fn is_blocked_by_application_immunity(
@@ -578,11 +578,7 @@ fn is_blocked_by_application_immunity(
                 .get_granted_application_immunity()
                 .iter()
                 .any(|immunity| {
-                    immunity.matches(
-                        source_tags.as_deref(),
-                        incoming_asset_tags,
-                        &params.tag_manager,
-                    )
+                    immunity.matches(source_tags, incoming_asset_tags, &params.tag_manager)
                 })
         })
 }
@@ -595,13 +591,8 @@ fn should_remove_active_effect(
     let target_tags = tag_query.get(effect.get_target()).ok();
     let effect_tags = effect.get_spec().get_def_tags();
 
-    removal_requirement_matches(
-        effect_tags.get_source_removal_tags(),
-        source_tags.as_deref(),
-    ) || removal_requirement_matches(
-        effect_tags.get_target_removal_tags(),
-        target_tags.as_deref(),
-    )
+    removal_requirement_matches(effect_tags.get_source_removal_tags(), source_tags)
+        || removal_requirement_matches(effect_tags.get_target_removal_tags(), target_tags)
 }
 
 fn removal_requirement_matches(
@@ -619,12 +610,8 @@ fn passes_ongoing_requirements(
     let target_tags = tag_query.get(effect.get_target()).ok();
     let effect_tags = effect.get_spec().get_def_tags();
 
-    effect_tags
-        .get_source_ongoing_tags()
-        .passes(source_tags.as_deref())
-        && effect_tags
-            .get_target_ongoing_tags()
-            .passes(target_tags.as_deref())
+    effect_tags.get_source_ongoing_tags().passes(source_tags)
+        && effect_tags.get_target_ongoing_tags().passes(target_tags)
 }
 
 fn inhibit_active_effect(
