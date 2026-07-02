@@ -1,18 +1,7 @@
 use super::AbilitySpecHandle;
-use bevy::prelude::Entity;
+use bevy::prelude::{Component, Entity};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ActiveAbilityHandle(u32);
-
-impl ActiveAbilityHandle {
-    pub fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    pub fn get_value(&self) -> u32 {
-        self.0
-    }
-}
+pub type ActiveAbilityHandle = Entity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbilityActivationStatus {
@@ -22,8 +11,9 @@ pub enum AbilityActivationStatus {
     Cancelled,
 }
 
+#[derive(Component, Clone)]
 pub struct ActiveGameplayAbility {
-    handle: ActiveAbilityHandle,
+    source: Entity,
     spec_handle: AbilitySpecHandle,
     target: Entity,
     status: AbilityActivationStatus,
@@ -31,21 +21,21 @@ pub struct ActiveGameplayAbility {
 
 impl ActiveGameplayAbility {
     pub fn new(
-        handle: ActiveAbilityHandle,
+        source: Entity,
         spec_handle: AbilitySpecHandle,
         target: Entity,
         status: AbilityActivationStatus,
     ) -> Self {
         Self {
-            handle,
+            source,
             spec_handle,
             target,
             status,
         }
     }
 
-    pub fn get_handle(&self) -> ActiveAbilityHandle {
-        self.handle
+    pub fn get_source(&self) -> Entity {
+        self.source
     }
 
     pub fn get_spec_handle(&self) -> AbilitySpecHandle {

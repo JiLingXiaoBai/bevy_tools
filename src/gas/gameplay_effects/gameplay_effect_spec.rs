@@ -52,8 +52,8 @@ pub struct GameplayEffectSpec {
     modifier_specs: Vec<ModifierSpec>,
     duration_spec: EffectDurationSpec,
     period_spec: Option<EffectPeriodSpec>,
-    _stacking_type: StackingType,
-    _stacking_limit: u32,
+    stacking_type: StackingType,
+    stacking_limit: u32,
 }
 
 impl GameplayEffectSpec {
@@ -70,8 +70,8 @@ impl GameplayEffectSpec {
             modifier_specs,
             duration_spec,
             period_spec,
-            _stacking_type: stacking_type,
-            _stacking_limit: stacking_limit,
+            stacking_type,
+            stacking_limit,
         }
     }
 
@@ -80,7 +80,7 @@ impl GameplayEffectSpec {
     }
 
     pub fn get_duration_spec(&self) -> &EffectDurationSpec {
-        &(self.duration_spec)
+        &self.duration_spec
     }
 
     pub fn get_modifier_specs(&self) -> &[ModifierSpec] {
@@ -89,5 +89,13 @@ impl GameplayEffectSpec {
 
     pub fn get_period_spec(&self) -> &Option<EffectPeriodSpec> {
         &self.period_spec
+    }
+
+    pub fn get_stacking_type(&self) -> StackingType {
+        self.stacking_type
+    }
+
+    pub fn get_stacking_limit(&self) -> u32 {
+        self.stacking_limit
     }
 }

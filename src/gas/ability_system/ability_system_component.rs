@@ -4,7 +4,7 @@ use crate::gameplay_abilities::{
     AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle, ActiveGameplayAbility,
     GameplayAbility, GameplayAbilitySpec,
 };
-use crate::gameplay_effects::EffectContext;
+use crate::gameplay_effects::{ActiveGameplayEffect, EffectContext};
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
 use crate::randoms::Random;
 use bevy::ecs::system::SystemParam;
@@ -20,15 +20,15 @@ pub struct AbilitySystemParams<'w, 's> {
     pub tag_container_query: Query<'w, 's, &'static mut GameplayTagContainer>,
     pub asc_query: Query<'w, 's, &'static mut AbilitySystemComponent>,
     pub attr_set_snapshot_query: Query<'w, 's, &'static AttributeSetSnapshot>,
+    pub active_effect_query: Query<'w, 's, (Entity, &'static ActiveGameplayEffect)>,
+    pub active_ability_query: Query<'w, 's, (Entity, &'static ActiveGameplayAbility)>,
     pub time: Res<'w, Time>,
 }
 
 #[derive(Component, Default)]
 pub struct AbilitySystemComponent {
     next_ability_handle: u32,
-    next_active_ability_handle: u32,
     abilities: Vec<GameplayAbilitySpec>,
-    active_abilities: Vec<ActiveGameplayAbility>,
     blocked_ability_tags: GameplayTagContainer,
 }
 
@@ -46,23 +46,12 @@ impl AbilitySystemComponent {
         handle
     }
 
-    pub fn clear_ability(
-        &mut self,
-        handle: AbilitySpecHandle,
-        tag_manager: &Res<GameplayTagManager>,
-    ) -> bool {
-        let active_handles: Vec<_> = self
-            .active_abilities
-            .iter()
-            .filter(|active| active.get_spec_handle() == handle)
-            .map(|active| active.get_handle())
-            .collect();
-        for active_handle in active_handles {
-            self.finish_active_ability(
-                active_handle,
-                AbilityActivationStatus::Cancelled,
-                tag_manager,
-            );
+    pub fn clear_ability(&mut self, handle: AbilitySpecHandle) -> bool {
+        if self
+            .find_ability_spec(handle)
+            .is_some_and(|spec| spec.get_active_count() > 0)
+        {
+            return false;
         }
 
         let old_len = self.abilities.len();
@@ -72,10 +61,6 @@ impl AbilitySystemComponent {
 
     pub fn get_ability_specs(&self) -> &[GameplayAbilitySpec] {
         &self.abilities
-    }
-
-    pub fn get_active_abilities(&self) -> &[ActiveGameplayAbility] {
-        &self.active_abilities
     }
 
     pub fn get_blocked_ability_tags(&self) -> &GameplayTagContainer {
@@ -99,33 +84,30 @@ impl AbilitySystemComponent {
 
     fn start_ability(
         &mut self,
+        source: Entity,
         target: Entity,
         spec_handle: AbilitySpecHandle,
         ability: &GameplayAbility,
+        commands: &mut Commands,
         tag_manager: &Res<GameplayTagManager>,
     ) -> ActiveAbilityHandle {
-        self.cancel_active_abilities_with_tags(
-            ability.get_tags().get_cancel_abilities_with_tags(),
-            tag_manager,
-        );
         self.blocked_ability_tags.add_tags(
             ability.get_tags().get_block_abilities_with_tags(),
             tag_manager,
         );
 
-        let active_handle = ActiveAbilityHandle::new(self.next_active_ability_handle);
-        self.next_active_ability_handle = self.next_active_ability_handle.wrapping_add(1);
-
         if let Some(spec) = self.find_ability_spec_mut(spec_handle) {
             spec.increment_active_count();
         }
 
-        self.active_abilities.push(ActiveGameplayAbility::new(
-            active_handle,
+        let mut entity_cmds = commands.spawn(ActiveGameplayAbility::new(
+            source,
             spec_handle,
             target,
             AbilityActivationStatus::Active,
         ));
+        let active_handle = entity_cmds.id();
+        entity_cmds.set_parent_in_place(source);
 
         active_handle
     }
@@ -133,19 +115,11 @@ impl AbilitySystemComponent {
     fn finish_active_ability(
         &mut self,
         active_handle: ActiveAbilityHandle,
-        status: AbilityActivationStatus,
+        active_ability: &ActiveGameplayAbility,
+        commands: &mut Commands,
         tag_manager: &Res<GameplayTagManager>,
     ) -> bool {
-        let Some(index) = self
-            .active_abilities
-            .iter()
-            .position(|active| active.get_handle() == active_handle)
-        else {
-            return false;
-        };
-
-        self.active_abilities[index].set_status(status);
-        let spec_handle = self.active_abilities[index].get_spec_handle();
+        let spec_handle = active_ability.get_spec_handle();
         let blocked_tags = self
             .find_ability_spec(spec_handle)
             .map(|spec| {
@@ -162,39 +136,8 @@ impl AbilitySystemComponent {
 
         self.blocked_ability_tags
             .remove_tags(&blocked_tags, tag_manager);
-        self.active_abilities.swap_remove(index);
+        commands.entity(active_handle).despawn();
         true
-    }
-
-    fn cancel_active_abilities_with_tags(
-        &mut self,
-        tags: &[GameplayTag],
-        tag_manager: &Res<GameplayTagManager>,
-    ) {
-        if tags.is_empty() {
-            return;
-        }
-
-        let active_handles: Vec<_> = self
-            .active_abilities
-            .iter()
-            .filter_map(|active| {
-                let spec = self.find_ability_spec(active.get_spec_handle())?;
-                if ability_has_any_tags(spec.get_ability(), tags, tag_manager) {
-                    Some(active.get_handle())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for active_handle in active_handles {
-            self.finish_active_ability(
-                active_handle,
-                AbilityActivationStatus::Cancelled,
-                tag_manager,
-            );
-        }
     }
 }
 
@@ -226,11 +169,24 @@ pub fn try_activate_ability_by_handle(
         return false;
     }
 
+    cancel_active_abilities_with_tags(
+        source,
+        ability.get_tags().get_cancel_abilities_with_tags(),
+        params,
+    );
+
     let active_handle = {
         let Ok(mut asc) = params.asc_query.get_mut(source) else {
             return false;
         };
-        asc.start_ability(target, handle, &ability, &params.tag_manager)
+        asc.start_ability(
+            source,
+            target,
+            handle,
+            &ability,
+            &mut params.commands,
+            &params.tag_manager,
+        )
     };
 
     commit_ability(source, target, &ability, level, params);
@@ -251,13 +207,11 @@ pub fn end_ability(
     active_handle: ActiveAbilityHandle,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    let Ok(mut asc) = params.asc_query.get_mut(source) else {
-        return false;
-    };
-    asc.finish_active_ability(
+    finish_ability_with_status(
+        source,
         active_handle,
         AbilityActivationStatus::Ending,
-        &params.tag_manager,
+        params,
     )
 }
 
@@ -266,13 +220,11 @@ pub fn cancel_ability(
     active_handle: ActiveAbilityHandle,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    let Ok(mut asc) = params.asc_query.get_mut(source) else {
-        return false;
-    };
-    asc.finish_active_ability(
+    finish_ability_with_status(
+        source,
         active_handle,
         AbilityActivationStatus::Cancelled,
-        &params.tag_manager,
+        params,
     )
 }
 
@@ -324,6 +276,63 @@ pub fn commit_ability(
 
     if let Some(cooldown_def) = ability.get_cooldown() {
         apply_gameplay_effect(source, source, cooldown_def, params, level);
+    }
+}
+
+fn finish_ability_with_status(
+    source: Entity,
+    active_handle: ActiveAbilityHandle,
+    _status: AbilityActivationStatus,
+    params: &mut AbilitySystemParams,
+) -> bool {
+    let Ok((_, active_ability)) = params.active_ability_query.get(active_handle) else {
+        return false;
+    };
+    if active_ability.get_source() != source {
+        return false;
+    }
+    let active_ability = active_ability.clone();
+
+    let Ok(mut asc) = params.asc_query.get_mut(source) else {
+        return false;
+    };
+    asc.finish_active_ability(
+        active_handle,
+        &active_ability,
+        &mut params.commands,
+        &params.tag_manager,
+    )
+}
+
+fn cancel_active_abilities_with_tags(
+    source: Entity,
+    tags: &[GameplayTag],
+    params: &mut AbilitySystemParams,
+) {
+    if tags.is_empty() {
+        return;
+    }
+
+    let active_handles: Vec<_> = {
+        let Ok(asc) = params.asc_query.get(source) else {
+            return;
+        };
+        params
+            .active_ability_query
+            .iter()
+            .filter_map(|(active_handle, active)| {
+                if active.get_source() != source {
+                    return None;
+                }
+                let spec = asc.find_ability_spec(active.get_spec_handle())?;
+                ability_has_any_tags(spec.get_ability(), tags, &params.tag_manager)
+                    .then_some(active_handle)
+            })
+            .collect()
+    };
+
+    for active_handle in active_handles {
+        cancel_ability(source, active_handle, params);
     }
 }
 
