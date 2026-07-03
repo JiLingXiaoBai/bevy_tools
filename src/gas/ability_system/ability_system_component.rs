@@ -4,7 +4,7 @@ use crate::gameplay_abilities::{
     GameplayAbility, GameplayAbilitySpec,
 };
 use crate::gameplay_effects::{
-    ActiveEffectDuration, ActiveEffectPeriod, ActiveGameplayEffect, EffectContext,
+    ActiveEffectDurationTicks, ActiveEffectPeriodTicks, ActiveGameplayEffect, EffectContext,
 };
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
 use crate::randoms::Random;
@@ -28,8 +28,8 @@ pub struct AbilitySystemParams<'w, 's> {
         (
             Entity,
             &'static mut ActiveGameplayEffect,
-            Option<&'static mut ActiveEffectDuration>,
-            Option<&'static mut ActiveEffectPeriod>,
+            Option<&'static mut ActiveEffectDurationTicks>,
+            Option<&'static mut ActiveEffectPeriodTicks>,
         ),
     >,
     pub active_ability_query: Query<'w, 's, (Entity, &'static mut ActiveGameplayAbility)>,
@@ -315,6 +315,9 @@ pub fn commit_ability(
     params: &mut AbilitySystemParams,
 ) -> bool {
     let cost_plan = if let Some(cost_def) = ability.get_cost() {
+        if !cost_def.has_only_add_modifiers() {
+            return false;
+        }
         let Some(plan) = prepare_gameplay_effect(source, source, cost_def, params, level) else {
             return false;
         };
@@ -428,6 +431,9 @@ fn can_pay_ability_cost(
     let Some(cost_def) = ability.get_cost() else {
         return true;
     };
+    if !cost_def.has_only_add_modifiers() {
+        return false;
+    }
 
     let context = EffectContext {
         source: Some(source),

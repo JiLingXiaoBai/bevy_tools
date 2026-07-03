@@ -3,42 +3,42 @@ use crate::modifiers::ModifierSpec;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]
-pub enum EffectDurationSpec {
+pub enum EffectDurationTicksSpec {
     Instant,
-    Duration(u32),
+    DurationTicks(u32),
     Infinite,
 }
 
-impl EffectDurationSpec {
+impl EffectDurationTicksSpec {
     pub fn is_infinite(&self) -> bool {
-        matches!(self, EffectDurationSpec::Infinite)
+        matches!(self, EffectDurationTicksSpec::Infinite)
     }
 
     pub fn is_instant(&self) -> bool {
-        matches!(self, EffectDurationSpec::Instant)
+        matches!(self, EffectDurationTicksSpec::Instant)
     }
 
     pub fn is_duration(&self) -> bool {
-        matches!(self, EffectDurationSpec::Duration(_))
+        matches!(self, EffectDurationTicksSpec::DurationTicks(_))
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct EffectPeriodSpec {
-    period: u32,
+pub struct EffectPeriodTicksSpec {
+    period_ticks: u32,
     execute_on_applied: bool,
 }
 
-impl EffectPeriodSpec {
-    pub fn new(period: u32, execute_on_applied: bool) -> Self {
+impl EffectPeriodTicksSpec {
+    pub fn new(period_ticks: u32, execute_on_applied: bool) -> Self {
         Self {
-            period,
+            period_ticks,
             execute_on_applied,
         }
     }
 
-    pub fn get_period(&self) -> u32 {
-        self.period
+    pub fn get_period_ticks(&self) -> u32 {
+        self.period_ticks
     }
 
     pub fn get_execute_on_applied(&self) -> bool {
@@ -50,8 +50,8 @@ impl EffectPeriodSpec {
 pub struct GameplayEffectSpec {
     def: Arc<GameplayEffect>,
     modifier_specs: Vec<ModifierSpec>,
-    duration_spec: EffectDurationSpec,
-    period_spec: Option<EffectPeriodSpec>,
+    duration_spec: EffectDurationTicksSpec,
+    period_spec: Option<EffectPeriodTicksSpec>,
     stacking_type: StackingType,
     stacking_limit: u32,
 }
@@ -60,8 +60,8 @@ impl GameplayEffectSpec {
     pub fn new(
         def: Arc<GameplayEffect>,
         modifier_specs: Vec<ModifierSpec>,
-        duration_spec: EffectDurationSpec,
-        period_spec: Option<EffectPeriodSpec>,
+        duration_spec: EffectDurationTicksSpec,
+        period_spec: Option<EffectPeriodTicksSpec>,
         stacking_type: StackingType,
         stacking_limit: u32,
     ) -> Self {
@@ -83,7 +83,7 @@ impl GameplayEffectSpec {
         self.def.get_tags()
     }
 
-    pub fn get_duration_spec(&self) -> &EffectDurationSpec {
+    pub fn get_duration_spec(&self) -> &EffectDurationTicksSpec {
         &self.duration_spec
     }
 
@@ -91,7 +91,7 @@ impl GameplayEffectSpec {
         &self.modifier_specs
     }
 
-    pub fn get_period_spec(&self) -> &Option<EffectPeriodSpec> {
+    pub fn get_period_spec(&self) -> &Option<EffectPeriodTicksSpec> {
         &self.period_spec
     }
 

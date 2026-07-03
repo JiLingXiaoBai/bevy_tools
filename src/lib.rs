@@ -33,9 +33,9 @@ impl Plugin for RandomPlugin {
     }
 }
 
-pub struct GameplayAbilitySystemPlugin;
+pub struct GameplayAbilitySystemRuntimePlugin;
 
-impl Plugin for GameplayAbilitySystemPlugin {
+impl Plugin for GameplayAbilitySystemRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AttributeIdManager>().add_systems(
             FixedUpdate,
@@ -50,14 +50,14 @@ impl Plugin for GameplayAbilitySystemPlugin {
     }
 }
 
-pub struct GameplayTagBundlePlugin;
+pub struct GameplayAbilitySystemPlugin;
 
-impl PluginGroup for GameplayTagBundlePlugin {
+impl PluginGroup for GameplayAbilitySystemPlugin {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
             .add(UniqueNamePlugin)
             .add(GameplayTagPlugin)
             .add(RandomPlugin)
-            .add(GameplayAbilitySystemPlugin)
+            .add(GameplayAbilitySystemRuntimePlugin)
     }
 }

@@ -26,22 +26,24 @@ pub struct GameplayTagRegister<'w> {
 }
 
 impl<'w> GameplayTagRegister<'w> {
-    pub fn request_or_register_tag(&mut self, full_tag_name: &str) -> GameplayTag {
+    pub fn request_or_register_tag(
+        &mut self,
+        full_tag_name: &str,
+    ) -> Result<GameplayTag, GameplayTagError> {
         let unique_name = self.unique_name_pool.new_name(full_tag_name);
 
         if let Some(tag) = self.gameplay_tag_manager.get_tag(unique_name) {
-            return tag;
+            return Ok(tag);
         }
 
         let parent_tag_index = full_tag_name
             .rsplit_once('.')
             // Found a parent string (e.g., "Ability.Fireball" -> "Ability")
             .map(|(parent_name, _)| {
-                // *** RECURSIVE CALL ***
-                // Ensure the parent is registered before proceeding
-                let parent_tag = self.request_or_register_tag(parent_name);
-                parent_tag.0
-            });
+                self.request_or_register_tag(parent_name)
+                    .map(|parent_tag| parent_tag.0)
+            })
+            .transpose()?;
 
         self.gameplay_tag_manager
             .register_tag_internal(unique_name, parent_tag_index)

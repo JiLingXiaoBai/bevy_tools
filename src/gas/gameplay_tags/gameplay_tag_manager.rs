@@ -3,7 +3,31 @@ use crate::settings::GameplayAbilitySystemSettings;
 use crate::unique_names::UniqueName;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use std::error::Error;
+use std::fmt;
 pub const MAX_TAG_COUNTS: usize = GameplayAbilitySystemSettings::GAMEPLAY_TAG_SIZE;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameplayTagError {
+    CapacityExceeded { max: usize },
+    InvalidTagIndex { index: usize },
+}
+
+impl fmt::Display for GameplayTagError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GameplayTagError::CapacityExceeded { max } => {
+                write!(f, "gameplay tag capacity exceeded; max tags: {max}")
+            }
+            GameplayTagError::InvalidTagIndex { index } => {
+                write!(f, "invalid gameplay tag index: {index}")
+            }
+        }
+    }
+}
+
+impl Error for GameplayTagError {}
+
 #[derive(Resource)]
 pub struct GameplayTagManager {
     tag_name_to_index: HashMap<UniqueName, u16>,
@@ -36,14 +60,16 @@ impl GameplayTagManager {
         &mut self,
         unique_name: UniqueName,
         parent_tag_index: Option<u16>,
-    ) -> GameplayTag {
+    ) -> Result<GameplayTag, GameplayTagError> {
         if let Some(&index) = self.tag_name_to_index.get(&unique_name) {
-            return GameplayTag::new(index);
+            return Ok(GameplayTag::new(index));
         }
 
         let new_index = self.next_tag_index;
         if new_index as usize >= MAX_TAG_COUNTS {
-            panic!("Exceeded MAX_TAG_COUNTS");
+            return Err(GameplayTagError::CapacityExceeded {
+                max: MAX_TAG_COUNTS,
+            });
         }
 
         // Create inherited bits: Start with parent's bits or new empty bits
@@ -53,7 +79,11 @@ impl GameplayTagManager {
 
         // Set the current tag's own bit in the inherited bits
         let self_tag = GameplayTag::new(new_index);
-        add_bit_with_tag(&mut inherited_bits, &self_tag);
+        add_bit_with_tag(&mut inherited_bits, &self_tag).ok_or(
+            GameplayTagError::InvalidTagIndex {
+                index: self_tag.get_bit_index_usize(),
+            },
+        )?;
 
         // Update the Manager data structures
         if new_index as usize == self.tag_parent_index.len() {
@@ -68,7 +98,7 @@ impl GameplayTagManager {
         }
         self.next_tag_index += 1;
 
-        self_tag
+        Ok(self_tag)
     }
 
     pub fn get_inherited_bits(&self, tag: &GameplayTag) -> Option<&GameplayTagBits> {

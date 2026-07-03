@@ -7,22 +7,23 @@ pub const MAX_TAG_BLOCKS: usize = MAX_TAG_COUNTS.div_ceil(TAG_BITS_PER_BLOCK);
 
 pub type GameplayTagBits = [u64; MAX_TAG_BLOCKS];
 
-pub fn tag_bits_from_tags(tags: &[GameplayTag]) -> GameplayTagBits {
+pub fn tag_bits_from_tags(tags: &[GameplayTag]) -> Option<GameplayTagBits> {
     let mut result = GameplayTagBits::default();
     for tag in tags {
-        add_bit_with_tag(&mut result, tag);
+        add_bit_with_tag(&mut result, tag)?;
     }
-    result
+    Some(result)
 }
 
-pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) {
+pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) -> Option<()> {
     let tag_bit_index = tag.get_bit_index_usize();
     if tag_bit_index >= MAX_TAG_COUNTS {
-        panic!("Exceeded MAX_TAG_COUNTS");
+        return None;
     }
     let block = tag_bit_index >> BLOCK_SIZE_EXPONENT;
     let bit = tag_bit_index & (TAG_BITS_PER_BLOCK - 1);
     bits[block] |= 1u64 << bit;
+    Some(())
 }
 
 #[derive(Component)]
@@ -113,21 +114,25 @@ impl GameplayTagContainer {
     pub fn has_tag(&self, tag: &GameplayTag) -> bool {
         let tag_bit_index = tag.get_bit_index_usize();
         if tag_bit_index >= MAX_TAG_COUNTS {
-            panic!("Exceeded MAX_TAG_COUNTS");
+            return false;
         };
         let block = tag_bit_index >> BLOCK_SIZE_EXPONENT;
         let bit = tag_bit_index & (TAG_BITS_PER_BLOCK - 1);
         (self.tag_bits[block] & (1u64 << bit)) != 0
     }
     pub fn has_all(&self, tags: &[GameplayTag]) -> bool {
-        let tag_bits = tag_bits_from_tags(tags);
+        let Some(tag_bits) = tag_bits_from_tags(tags) else {
+            return false;
+        };
         self.tag_bits
             .iter()
             .zip(tag_bits.iter())
             .all(|(a, b)| (a & b) == *b)
     }
     pub fn has_any(&self, tags: &[GameplayTag]) -> bool {
-        let tag_bits = tag_bits_from_tags(tags);
+        let Some(tag_bits) = tag_bits_from_tags(tags) else {
+            return false;
+        };
         self.tag_bits
             .iter()
             .zip(tag_bits.iter())

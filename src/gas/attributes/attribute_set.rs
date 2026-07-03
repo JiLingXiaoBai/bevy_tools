@@ -12,6 +12,7 @@ pub type AttributePostExecute = fn(&mut AttributeSet, AttributeId, f64, f64);
 pub struct AttributeSet {
     attributes: Box<[Option<Box<Attribute>>]>,
     post_execute: Option<AttributePostExecute>,
+    dirty: bool,
 }
 
 impl Default for AttributeSet {
@@ -23,6 +24,7 @@ impl Default for AttributeSet {
         Self {
             attributes: attrs.into_boxed_slice(),
             post_execute: None,
+            dirty: true,
         }
     }
 }
@@ -49,6 +51,7 @@ impl AttributeSet {
         let mut attr = Box::new(Attribute::default());
         attr.init_with_clamp(base_value, executor, clamp);
         self.attributes[index] = Some(attr);
+        self.mark_dirty();
         self.recalculate_all();
     }
 
@@ -57,6 +60,7 @@ impl AttributeSet {
         debug_assert!(index < self.attributes.len());
         if let Some(attr) = &mut self.attributes[index] {
             attr.set_clamp(clamp);
+            self.mark_dirty();
         }
         self.recalculate_all();
     }
@@ -68,10 +72,17 @@ impl AttributeSet {
     pub fn recalculate_attribute(&mut self, id: AttributeId) {
         let index = id.to_index();
         debug_assert!(index < self.attributes.len());
+        if self.attributes[index].is_some() {
+            self.mark_dirty();
+        }
         self.recalculate_all();
     }
 
     pub fn recalculate_all(&mut self) {
+        if !self.dirty {
+            return;
+        }
+
         for attr in self.attributes.iter_mut().flatten() {
             attr.recalculate();
         }
@@ -93,6 +104,8 @@ impl AttributeSet {
             let (min, max) = resolve_clamp_bounds(clamp, &current_values);
             attr.clamp_current(min, max);
         }
+
+        self.dirty = false;
     }
 
     pub fn get_current_value(&self, id: AttributeId) -> Option<f64> {
@@ -111,6 +124,7 @@ impl AttributeSet {
         let old_value = self.get_current_value(spec.get_id());
         if let Some(attr) = &mut self.attributes[index] {
             attr.modify_base_value(spec);
+            self.mark_dirty();
         }
         self.recalculate_all();
 
@@ -128,14 +142,19 @@ impl AttributeSet {
         debug_assert!(index < self.attributes.len());
         if let Some(attr) = &mut self.attributes[index] {
             attr.apply_modifier_spec(spec, handle);
+            self.mark_dirty();
         }
     }
 
     pub fn remove_modifiers(&mut self, handle: ActiveEffectHandle) {
-        self.attributes
-            .iter_mut()
-            .flatten()
-            .for_each(|attr| attr.remove_modifier_by_handle(handle));
+        let mut removed_from_any = false;
+        for attr in self.attributes.iter_mut().flatten() {
+            attr.remove_modifier_by_handle(handle);
+            removed_from_any = true;
+        }
+        if removed_from_any {
+            self.mark_dirty();
+        }
     }
 
     pub fn make_snapshot(&self, source_entity: Entity) -> AttributeSetSnapshot {
@@ -149,6 +168,10 @@ impl AttributeSet {
         }
 
         AttributeSetSnapshot::new(new_attrs, source_entity)
+    }
+
+    fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 }
 

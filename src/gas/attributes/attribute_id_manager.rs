@@ -3,6 +3,8 @@ use crate::{UniqueName, UniqueNamePool};
 use bevy::ecs::system::SystemParam;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::{ResMut, Resource};
+use std::error::Error;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AttributeId(u16);
@@ -15,6 +17,24 @@ impl AttributeId {
         self.0 as usize
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeIdError {
+    CapacityExceeded { max: usize },
+}
+
+impl fmt::Display for AttributeIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AttributeIdError::CapacityExceeded { max } => {
+                write!(f, "attribute id capacity exceeded; max attributes: {max}")
+            }
+        }
+    }
+}
+
+impl Error for AttributeIdError {}
+
 #[derive(Resource)]
 pub struct AttributeIdManager {
     name_to_index: HashMap<UniqueName, u16>,
@@ -37,20 +57,25 @@ impl AttributeIdManager {
             .map(|&id| AttributeId::new(id))
     }
 
-    pub fn register_id_internal(&mut self, unique_name: UniqueName) -> AttributeId {
+    pub fn register_id_internal(
+        &mut self,
+        unique_name: UniqueName,
+    ) -> Result<AttributeId, AttributeIdError> {
         if let Some(&index) = self.name_to_index.get(&unique_name) {
-            return AttributeId::new(index);
+            return Ok(AttributeId::new(index));
         }
 
         let new_index = self.next_id_index;
         if new_index as usize >= ATTRIBUTE_SET_SIZE {
-            panic!("Exceeded ATTRIBUTE_SET_SIZE")
+            return Err(AttributeIdError::CapacityExceeded {
+                max: ATTRIBUTE_SET_SIZE,
+            });
         }
 
         let attribute_id = AttributeId::new(new_index);
         self.name_to_index.insert(unique_name, new_index);
         self.next_id_index += 1;
-        attribute_id
+        Ok(attribute_id)
     }
 }
 #[derive(SystemParam)]
@@ -60,11 +85,14 @@ pub struct AttributeIdRegister<'w> {
 }
 
 impl<'w> AttributeIdRegister<'w> {
-    pub fn request_or_register_attribute_id(&mut self, attribute_id_name: &str) -> AttributeId {
+    pub fn request_or_register_attribute_id(
+        &mut self,
+        attribute_id_name: &str,
+    ) -> Result<AttributeId, AttributeIdError> {
         let unique_name = self.unique_name_pool.new_name(attribute_id_name);
 
         if let Some(attribute_id) = self.attribute_id_manager.get_attribute_id(unique_name) {
-            return attribute_id;
+            return Ok(attribute_id);
         }
         self.attribute_id_manager.register_id_internal(unique_name)
     }

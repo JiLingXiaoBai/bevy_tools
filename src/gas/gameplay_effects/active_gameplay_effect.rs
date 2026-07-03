@@ -1,5 +1,5 @@
 use super::gameplay_effect::{GameplayEffect, StackingType};
-use super::gameplay_effect_spec::{EffectDurationSpec, GameplayEffectSpec};
+use super::gameplay_effect_spec::{EffectDurationTicksSpec, GameplayEffectSpec};
 use crate::ability_system::AbilitySystemParams;
 use crate::attributes::AttributeSet;
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
@@ -58,12 +58,12 @@ impl ActiveGameplayEffect {
 }
 
 #[derive(Component)]
-pub struct ActiveEffectDuration {
+pub struct ActiveEffectDurationTicks {
     remain_ticks: u32,
 }
 
 #[derive(Component)]
-pub struct ActiveEffectPeriod {
+pub struct ActiveEffectPeriodTicks {
     period_ticks: u32,
     current_tick: u32,
 }
@@ -121,7 +121,7 @@ pub fn prepare_gameplay_effect(
     };
 
     let duration_spec = spec.get_duration_spec();
-    if matches!(duration_spec, EffectDurationSpec::Duration(0)) {
+    if matches!(duration_spec, EffectDurationTicksSpec::DurationTicks(0)) {
         return None;
     }
 
@@ -130,7 +130,7 @@ pub fn prepare_gameplay_effect(
         || spec
             .get_period_spec()
             .as_ref()
-            .is_some_and(|period| period.get_execute_on_applied() || period.get_period() > 0);
+            .is_some_and(|period| period.get_execute_on_applied() || period.get_period_ticks() > 0);
     if needs_attribute_set && params.attr_set_query.get(target).is_err() {
         return None;
     }
@@ -244,7 +244,7 @@ fn execute_stack_existing_effect(
     let existing_target = active_effect.get_target();
     let existing_spec = active_effect.get_spec().clone();
 
-    if let (EffectDurationSpec::Duration(duration_ticks), Some(mut duration)) =
+    if let (EffectDurationTicksSpec::DurationTicks(duration_ticks), Some(mut duration)) =
         (plan.spec.get_duration_spec(), duration)
     {
         duration.remain_ticks = *duration_ticks;
@@ -282,14 +282,14 @@ fn execute_new_active_effect(
 
     let effect_entity = entity_cmds.id();
 
-    if let EffectDurationSpec::Duration(duration) = plan.spec.get_duration_spec() {
-        entity_cmds.insert(ActiveEffectDuration {
+    if let EffectDurationTicksSpec::DurationTicks(duration) = plan.spec.get_duration_spec() {
+        entity_cmds.insert(ActiveEffectDurationTicks {
             remain_ticks: *duration,
         });
     }
 
     if let Some(period_spec) = plan.spec.get_period_spec() {
-        let period = period_spec.get_period();
+        let period_ticks = period_spec.get_period_ticks();
         let execute_on_application = period_spec.get_execute_on_applied();
         if execute_on_application {
             let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
@@ -298,9 +298,9 @@ fn execute_new_active_effect(
             };
             apply_instant_modifiers(&mut target_attrs_mut, &plan.spec, 1);
         }
-        if period > 0 {
-            entity_cmds.insert(ActiveEffectPeriod {
-                period_ticks: period,
+        if period_ticks > 0 {
+            entity_cmds.insert(ActiveEffectPeriodTicks {
+                period_ticks,
                 current_tick: 0,
             });
         }
@@ -420,7 +420,11 @@ pub fn cleanup_active_gameplay_effect(
 
 pub fn tick_effect_duration_system(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut ActiveEffectDuration, &ActiveGameplayEffect)>,
+    mut query: Query<(
+        Entity,
+        &mut ActiveEffectDurationTicks,
+        &ActiveGameplayEffect,
+    )>,
     mut attr_query: Query<&mut AttributeSet>,
     mut tag_query: Query<&mut GameplayTagContainer>,
     tag_manager: Res<GameplayTagManager>,
@@ -489,7 +493,7 @@ pub fn update_active_effect_tag_requirements_system(
 }
 
 pub fn tick_effect_period_system(
-    mut query: Query<(&mut ActiveEffectPeriod, &ActiveGameplayEffect)>,
+    mut query: Query<(&mut ActiveEffectPeriodTicks, &ActiveGameplayEffect)>,
     mut attr_query: Query<&mut AttributeSet>,
 ) {
     for (mut period, effect) in query.iter_mut() {
@@ -514,8 +518,8 @@ fn find_stackable_active_effect(
     active_effect_query: &mut Query<(
         Entity,
         &mut ActiveGameplayEffect,
-        Option<&mut ActiveEffectDuration>,
-        Option<&mut ActiveEffectPeriod>,
+        Option<&mut ActiveEffectDurationTicks>,
+        Option<&mut ActiveEffectPeriodTicks>,
     )>,
     ignored_handles: &[ActiveEffectHandle],
 ) -> Option<(ActiveEffectHandle, u32)> {
@@ -688,8 +692,8 @@ fn collect_active_effects_with_tags_for_params(
     active_effect_query: &mut Query<(
         Entity,
         &mut ActiveGameplayEffect,
-        Option<&mut ActiveEffectDuration>,
-        Option<&mut ActiveEffectPeriod>,
+        Option<&mut ActiveEffectDurationTicks>,
+        Option<&mut ActiveEffectPeriodTicks>,
     )>,
     tag_manager: &Res<GameplayTagManager>,
 ) -> Vec<ActiveEffectHandle> {
@@ -736,8 +740,8 @@ fn remove_collected_active_effects_for_params(
     active_effect_query: &mut Query<(
         Entity,
         &mut ActiveGameplayEffect,
-        Option<&mut ActiveEffectDuration>,
-        Option<&mut ActiveEffectPeriod>,
+        Option<&mut ActiveEffectDurationTicks>,
+        Option<&mut ActiveEffectPeriodTicks>,
     )>,
     commands: &mut Commands,
     attr_query: &mut Query<&mut AttributeSet>,

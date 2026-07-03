@@ -1,8 +1,10 @@
-use super::gameplay_effect_spec::{EffectDurationSpec, EffectPeriodSpec, GameplayEffectSpec};
+use super::gameplay_effect_spec::{
+    EffectDurationTicksSpec, EffectPeriodTicksSpec, GameplayEffectSpec,
+};
 use crate::ability_system::AbilitySystemComponent;
 use crate::attributes::{AttributeSet, AttributeSetSnapshot};
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
-use crate::modifiers::{Modifier, ModifierMagnitude};
+use crate::modifiers::{Modifier, ModifierMagnitude, ModifierOperation};
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::Query;
 use bevy::prelude::Res;
@@ -18,49 +20,47 @@ pub struct EffectContext<'w, 's> {
     pub level: u32,
 }
 
-pub enum EffectDuration {
+pub enum EffectDurationTicks {
     Instant,
-    /// Duration is measured in fixed ticks, not seconds.
-    Duration(ModifierMagnitude),
+    DurationTicks(ModifierMagnitude),
     Infinite,
 }
 
-impl EffectDuration {
-    pub fn make_spec(&self, context: &EffectContext) -> EffectDurationSpec {
+impl EffectDurationTicks {
+    pub fn make_spec(&self, context: &EffectContext) -> EffectDurationTicksSpec {
         match self {
-            EffectDuration::Instant => EffectDurationSpec::Instant,
-            EffectDuration::Duration(mm) => {
-                EffectDurationSpec::Duration(magnitude_to_ticks(match mm {
+            EffectDurationTicks::Instant => EffectDurationTicksSpec::Instant,
+            EffectDurationTicks::DurationTicks(mm) => {
+                EffectDurationTicksSpec::DurationTicks(magnitude_to_ticks(match mm {
                     ModifierMagnitude::Flat(f) => *f,
                     ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
                 }))
             }
-            EffectDuration::Infinite => EffectDurationSpec::Infinite,
+            EffectDurationTicks::Infinite => EffectDurationTicksSpec::Infinite,
         }
     }
 }
 
-/// Period is measured in fixed ticks.
-pub struct EffectPeriod {
-    period: ModifierMagnitude,
+pub struct EffectPeriodTicks {
+    period_ticks: ModifierMagnitude,
     execute_on_applied: bool,
 }
 
-impl EffectPeriod {
-    pub fn new(period: ModifierMagnitude, execute_on_applied: bool) -> Self {
+impl EffectPeriodTicks {
+    pub fn new(period_ticks: ModifierMagnitude, execute_on_applied: bool) -> Self {
         Self {
-            period,
+            period_ticks,
             execute_on_applied,
         }
     }
 
-    pub fn make_spec(&self, context: &EffectContext) -> EffectPeriodSpec {
-        let final_value = match &self.period {
+    pub fn make_spec(&self, context: &EffectContext) -> EffectPeriodTicksSpec {
+        let final_value = match &self.period_ticks {
             ModifierMagnitude::Flat(f) => *f,
             ModifierMagnitude::Calculated(mmc) => mmc.calculate(context),
         };
         let final_value = magnitude_to_ticks(final_value);
-        EffectPeriodSpec::new(final_value, self.execute_on_applied)
+        EffectPeriodTicksSpec::new(final_value, self.execute_on_applied)
     }
 }
 
@@ -244,8 +244,8 @@ impl EffectTags {
 // stored as a Resource
 pub struct GameplayEffect {
     modifiers: Vec<Modifier>,
-    duration: EffectDuration,
-    period: Option<EffectPeriod>,
+    duration: EffectDurationTicks,
+    period: Option<EffectPeriodTicks>,
     probability_to_apply: f64,
     stacking_type: StackingType,
     stacking_limit: u32,
@@ -255,8 +255,8 @@ pub struct GameplayEffect {
 impl GameplayEffect {
     pub fn new(
         modifiers: Vec<Modifier>,
-        duration: EffectDuration,
-        period: Option<EffectPeriod>,
+        duration: EffectDurationTicks,
+        period: Option<EffectPeriodTicks>,
         probability_to_apply: f64,
         stacking_type: StackingType,
         stacking_limit: u32,
@@ -289,6 +289,12 @@ impl GameplayEffect {
 
     pub fn get_tags(&self) -> &EffectTags {
         &self.tags
+    }
+
+    pub fn has_only_add_modifiers(&self) -> bool {
+        self.modifiers
+            .iter()
+            .all(|modifier| modifier.get_operation() == ModifierOperation::Add)
     }
 
     pub fn get_probability_to_apply(&self) -> f64 {

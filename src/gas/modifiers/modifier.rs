@@ -29,6 +29,10 @@ impl Modifier {
         Modifier { id, op, magnitude }
     }
 
+    pub fn get_operation(&self) -> ModifierOperation {
+        self.op
+    }
+
     pub fn make_spec(&self, context: &EffectContext) -> ModifierSpec {
         let final_value = match &self.magnitude {
             ModifierMagnitude::Flat(value) => *value,
