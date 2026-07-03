@@ -35,24 +35,14 @@ impl AttributeSet {
         id: AttributeId,
         base_value: f64,
         executor: Option<fn(&Aggregator, f64) -> f64>,
-    ) {
-        self.initialize_attribute_with_clamp(id, base_value, executor, AttributeClamp::None);
-    }
-
-    pub fn initialize_attribute_with_clamp(
-        &mut self,
-        id: AttributeId,
-        base_value: f64,
-        executor: Option<fn(&Aggregator, f64) -> f64>,
         clamp: AttributeClamp,
     ) {
         let index = id.to_index();
         debug_assert!(index < self.attributes.len());
         let mut attr = Box::new(Attribute::default());
-        attr.init_with_clamp(base_value, executor, clamp);
+        attr.init(base_value, executor, clamp);
         self.attributes[index] = Some(attr);
         self.mark_dirty();
-        self.recalculate_all();
     }
 
     pub fn set_attribute_clamp(&mut self, id: AttributeId, clamp: AttributeClamp) {
@@ -62,7 +52,6 @@ impl AttributeSet {
             attr.set_clamp(clamp);
             self.mark_dirty();
         }
-        self.recalculate_all();
     }
 
     pub fn set_post_execute(&mut self, post_execute: Option<AttributePostExecute>) {
@@ -83,24 +72,8 @@ impl AttributeSet {
             return;
         }
 
-        let current_values = self
-            .attributes
-            .iter_mut()
-            .map(|attr| {
-                attr.as_mut().map(|attr| {
-                    let clamp = attr.get_clamp();
-                    let (min, max) = resolve_static_clamp_bounds(clamp);
-                    let _ = attr.get_current_value();
-                    attr.clamp_current(min, max);
-                    attr.get_current_value()
-                })
-            })
-            .collect::<Vec<_>>();
-
         for attr in self.attributes.iter_mut().flatten() {
-            let clamp = attr.get_clamp();
-            let (min, max) = resolve_clamp_bounds(clamp, &current_values);
-            attr.clamp_current(min, max);
+            attr.recalculate();
         }
 
         self.dirty = false;
@@ -120,13 +93,11 @@ impl AttributeSet {
     pub fn apply_instant_modifier(&mut self, spec: &ModifierSpec) {
         let index = spec.get_id().to_index();
         debug_assert!(index < self.attributes.len());
-        self.recalculate_all();
         let old_value = self.get_current_value(spec.get_id());
         if let Some(attr) = &mut self.attributes[index] {
             attr.modify_base_value(spec);
             self.mark_dirty();
         }
-        self.recalculate_all();
 
         if let (Some(old_value), Some(new_value), Some(post_execute)) = (
             old_value,
@@ -174,51 +145,6 @@ impl AttributeSet {
 
     fn mark_dirty(&mut self) {
         self.dirty = true;
-    }
-}
-
-fn resolve_clamp_bounds(
-    clamp: AttributeClamp,
-    current_values: &[Option<f64>],
-) -> (Option<f64>, Option<f64>) {
-    let AttributeClamp::Range { min, max } = clamp else {
-        return (None, None);
-    };
-
-    (
-        resolve_clamp_bound(min, current_values),
-        resolve_clamp_bound(max, current_values),
-    )
-}
-
-fn resolve_static_clamp_bounds(clamp: AttributeClamp) -> (Option<f64>, Option<f64>) {
-    let AttributeClamp::Range { min, max } = clamp else {
-        return (None, None);
-    };
-
-    (
-        resolve_static_clamp_bound(min),
-        resolve_static_clamp_bound(max),
-    )
-}
-
-fn resolve_static_clamp_bound(bound: Option<AttributeClampBound>) -> Option<f64> {
-    match bound {
-        Some(AttributeClampBound::Static(value)) => Some(value),
-        Some(AttributeClampBound::Attribute(_)) | None => None,
-    }
-}
-
-fn resolve_clamp_bound(
-    bound: Option<AttributeClampBound>,
-    current_values: &[Option<f64>],
-) -> Option<f64> {
-    match bound {
-        Some(AttributeClampBound::Static(value)) => Some(value),
-        Some(AttributeClampBound::Attribute(id)) => {
-            current_values.get(id.to_index()).copied().flatten()
-        }
-        None => None,
     }
 }
 

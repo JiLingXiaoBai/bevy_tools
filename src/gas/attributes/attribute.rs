@@ -1,28 +1,22 @@
 use super::attribute_aggregator::Aggregator;
-use super::attribute_id_manager::AttributeId;
 use super::attribute_snapshot::AttributeSnapshot;
 use crate::gameplay_effects::ActiveEffectHandle;
 use crate::modifiers::{ModifierOperation, ModifierSpec};
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AttributeClampBound {
-    Static(f64),
-    Attribute(AttributeId),
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum AttributeClamp {
     #[default]
     None,
     Range {
-        min: Option<AttributeClampBound>,
-        max: Option<AttributeClampBound>,
+        min: Option<f64>,
+        max: Option<f64>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct Attribute {
     base: f64,
+    evaluated: f64,
     current: f64,
     aggregator: Aggregator,
     dirty: bool,
@@ -33,6 +27,7 @@ impl Default for Attribute {
     fn default() -> Self {
         Self {
             base: 0.0,
+            evaluated: 0.0,
             current: 0.0,
             aggregator: Aggregator::default(),
             dirty: true,
@@ -42,11 +37,7 @@ impl Default for Attribute {
 }
 
 impl Attribute {
-    pub fn init(&mut self, base_value: f64, executor: Option<fn(&Aggregator, f64) -> f64>) {
-        self.init_with_clamp(base_value, executor, AttributeClamp::None);
-    }
-
-    pub fn init_with_clamp(
+    pub fn init(
         &mut self,
         base_value: f64,
         executor: Option<fn(&Aggregator, f64) -> f64>,
@@ -54,16 +45,16 @@ impl Attribute {
     ) {
         self.base = base_value;
         self.clamp = clamp;
-        self.clamp_base_static();
         self.set_executor(executor);
         self.recalculate();
     }
 
     pub fn recalculate(&mut self) {
         if self.dirty {
-            self.current = self.aggregator.evaluate(self.base);
+            self.evaluated = self.aggregator.evaluate(self.base);
             self.dirty = false;
         }
+        self.clamp_current();
     }
 
     pub fn get_current_value(&mut self) -> f64 {
@@ -81,12 +72,12 @@ impl Attribute {
 
     pub fn set_clamp(&mut self, clamp: AttributeClamp) {
         self.clamp = clamp;
-        self.clamp_base_static();
         self.make_dirty();
     }
 
-    pub fn clamp_current(&mut self, min: Option<f64>, max: Option<f64>) {
-        let mut value = self.current;
+    fn clamp_current(&mut self) {
+        let (min, max) = self.get_clamp_bounds();
+        let mut value = self.evaluated;
         if let Some(min) = min {
             value = value.max(min);
         }
@@ -123,7 +114,6 @@ impl Attribute {
             ModifierOperation::Multiply => self.base *= spec.get_value(),
             ModifierOperation::Override => self.base = spec.get_value(),
         }
-        self.clamp_base_static();
         self.make_dirty();
     }
 
@@ -136,16 +126,10 @@ impl Attribute {
         AttributeSnapshot::new(self.base, self.current)
     }
 
-    fn clamp_base_static(&mut self) {
-        let AttributeClamp::Range { min, max } = self.clamp else {
-            return;
-        };
-
-        if let Some(AttributeClampBound::Static(min)) = min {
-            self.base = self.base.max(min);
-        }
-        if let Some(AttributeClampBound::Static(max)) = max {
-            self.base = self.base.min(max);
+    fn get_clamp_bounds(&self) -> (Option<f64>, Option<f64>) {
+        match self.clamp {
+            AttributeClamp::None => (None, None),
+            AttributeClamp::Range { min, max } => (min, max),
         }
     }
 }
