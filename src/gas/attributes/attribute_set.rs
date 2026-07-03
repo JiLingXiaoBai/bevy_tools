@@ -83,20 +83,18 @@ impl AttributeSet {
             return;
         }
 
-        for attr in self.attributes.iter_mut().flatten() {
-            attr.recalculate();
-        }
-
-        for attr in self.attributes.iter_mut().flatten() {
-            let clamp = attr.get_clamp();
-            let (min, max) = resolve_static_clamp_bounds(clamp);
-            attr.clamp_current(min, max);
-        }
-
         let current_values = self
             .attributes
-            .iter()
-            .map(|attr| attr.as_ref().map(|attr| attr.get_current_value()))
+            .iter_mut()
+            .map(|attr| {
+                attr.as_mut().map(|attr| {
+                    let clamp = attr.get_clamp();
+                    let (min, max) = resolve_static_clamp_bounds(clamp);
+                    let _ = attr.get_current_value();
+                    attr.clamp_current(min, max);
+                    attr.get_current_value()
+                })
+            })
             .collect::<Vec<_>>();
 
         for attr in self.attributes.iter_mut().flatten() {
@@ -108,10 +106,12 @@ impl AttributeSet {
         self.dirty = false;
     }
 
-    pub fn get_current_value(&self, id: AttributeId) -> Option<f64> {
+    pub fn get_current_value(&mut self, id: AttributeId) -> Option<f64> {
+        self.recalculate_all();
+
         let index = id.to_index();
         debug_assert!(index < self.attributes.len());
-        if let Some(attr) = &self.attributes[index] {
+        if let Some(attr) = &mut self.attributes[index] {
             return Some(attr.get_current_value());
         }
         None
@@ -157,7 +157,9 @@ impl AttributeSet {
         }
     }
 
-    pub fn make_snapshot(&self, source_entity: Entity) -> AttributeSetSnapshot {
+    pub fn make_snapshot(&mut self, source_entity: Entity) -> AttributeSetSnapshot {
+        self.recalculate_all();
+
         let mut new_attrs = Vec::with_capacity(self.attributes.len());
         for attr_opt in self.attributes.iter() {
             if let Some(attr) = attr_opt {

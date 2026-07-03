@@ -1,6 +1,6 @@
 use crate::ability_system::AbilityActivationQueue;
 use crate::gameplay_abilities::{AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle};
-use crate::gameplay_effects::{GameplayEffect, GameplayEffectApplicationQueue};
+use crate::gameplay_effects::{EffectPayload, GameplayEffect, GameplayEffectApplicationQueue};
 use bevy::prelude::*;
 use std::sync::Arc;
 
@@ -106,7 +106,8 @@ pub fn tick_ability_tasks_system(
                 effect,
                 level,
             } => {
-                effect_queue.push_application(source, target, effect, level);
+                let payload = EffectPayload::new(source, None, level);
+                effect_queue.push_application(target, effect, payload);
             }
         }
 

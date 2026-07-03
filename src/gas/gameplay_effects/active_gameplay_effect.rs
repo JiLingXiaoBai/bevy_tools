@@ -1,4 +1,4 @@
-use super::gameplay_effect::{GameplayEffect, StackingType};
+use super::gameplay_effect::{EffectPayload, GameplayEffect, StackingType};
 use super::gameplay_effect_spec::{EffectDurationTicksSpec, GameplayEffectSpec};
 use crate::ability_system::AbilitySystemParams;
 use crate::attributes::AttributeSet;
@@ -86,12 +86,13 @@ enum GameplayEffectApplicationKind {
 }
 
 pub fn prepare_gameplay_effect(
-    source: Entity,
     target: Entity,
     effect_def: &Arc<GameplayEffect>,
     params: &mut AbilitySystemParams,
-    level: u32,
+    payload: &EffectPayload,
 ) -> Option<GameplayEffectApplicationPlan> {
+    let source = payload.get_source();
+
     let probability = effect_def.get_probability_to_apply();
     if probability < 1.0 && !params.random_gen.random_bool(probability) {
         return None;
@@ -108,13 +109,11 @@ pub fn prepare_gameplay_effect(
 
     let spec = {
         let context = crate::gameplay_effects::EffectContext {
-            source: Some(source),
             target: Some(target),
+            payload,
             attr_set_query: &params.attr_set_query.as_readonly(),
             tag_container_query: &params.tag_container_query.as_readonly(),
             asc_query: &params.asc_query.as_readonly(),
-            attr_set_snapshot: params.attr_set_snapshot_query.get(source).ok(),
-            level,
         };
 
         effect_def.make_spec(&context)
@@ -205,13 +204,12 @@ pub fn execute_gameplay_effect_plan(
 }
 
 pub fn apply_gameplay_effect(
-    source: Entity,
     target: Entity,
     effect_def: &Arc<GameplayEffect>,
     params: &mut AbilitySystemParams,
-    level: u32,
+    payload: &EffectPayload,
 ) -> bool {
-    let Some(plan) = prepare_gameplay_effect(source, target, effect_def, params, level) else {
+    let Some(plan) = prepare_gameplay_effect(target, effect_def, params, payload) else {
         return false;
     };
 

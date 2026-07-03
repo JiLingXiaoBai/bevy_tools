@@ -1,5 +1,5 @@
 use crate::ability_system::AbilitySystemParams;
-use crate::gameplay_effects::{GameplayEffect, apply_gameplay_effect};
+use crate::gameplay_effects::{EffectPayload, GameplayEffect, apply_gameplay_effect};
 use crate::settings::GameplayAbilitySystemSettings;
 use bevy::prelude::*;
 use std::collections::VecDeque;
@@ -7,24 +7,18 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct GameplayEffectApplicationRequest {
-    source: Entity,
     target: Entity,
     effect: Arc<GameplayEffect>,
-    level: u32,
+    payload: EffectPayload,
 }
 
 impl GameplayEffectApplicationRequest {
-    pub fn new(source: Entity, target: Entity, effect: Arc<GameplayEffect>, level: u32) -> Self {
+    pub fn new(target: Entity, effect: Arc<GameplayEffect>, payload: EffectPayload) -> Self {
         Self {
-            source,
             target,
             effect,
-            level,
+            payload,
         }
-    }
-
-    pub fn get_source(&self) -> Entity {
-        self.source
     }
 
     pub fn get_target(&self) -> Entity {
@@ -35,8 +29,8 @@ impl GameplayEffectApplicationRequest {
         &self.effect
     }
 
-    pub fn get_level(&self) -> u32 {
-        self.level
+    pub fn get_payload(&self) -> &EffectPayload {
+        &self.payload
     }
 }
 
@@ -63,13 +57,12 @@ impl GameplayEffectApplicationQueue {
 
     pub fn push_application(
         &mut self,
-        source: Entity,
         target: Entity,
         effect: Arc<GameplayEffect>,
-        level: u32,
+        payload: EffectPayload,
     ) {
         self.push(GameplayEffectApplicationRequest::new(
-            source, target, effect, level,
+            target, effect, payload,
         ));
     }
 
@@ -109,11 +102,10 @@ pub fn process_gameplay_effect_application_queue_system(
         };
 
         apply_gameplay_effect(
-            request.get_source(),
             request.get_target(),
             request.get_effect(),
             &mut params,
-            request.get_level(),
+            request.get_payload(),
         );
     }
 }

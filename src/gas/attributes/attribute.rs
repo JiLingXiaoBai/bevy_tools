@@ -66,8 +66,8 @@ impl Attribute {
         }
     }
 
-    pub fn get_current_value(&self) -> f64 {
-        debug_assert!(!self.dirty);
+    pub fn get_current_value(&mut self) -> f64 {
+        self.recalculate();
         self.current
     }
 

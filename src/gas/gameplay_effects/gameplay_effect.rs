@@ -11,13 +11,69 @@ use bevy::prelude::Res;
 use std::sync::Arc;
 
 pub struct EffectContext<'w, 's> {
-    pub source: Option<Entity>,
     pub target: Option<Entity>,
+    pub payload: &'w EffectPayload,
     pub attr_set_query: &'w Query<'w, 's, &'static AttributeSet>,
     pub tag_container_query: &'w Query<'w, 's, &'static GameplayTagContainer>,
     pub asc_query: &'w Query<'w, 's, &'static AbilitySystemComponent>,
-    pub attr_set_snapshot: Option<&'w AttributeSetSnapshot>,
-    pub level: u32,
+}
+
+impl<'w, 's> EffectContext<'w, 's> {
+    pub fn source(&self) -> Entity {
+        self.payload.get_source()
+    }
+
+    pub fn causer(&self) -> Option<Entity> {
+        self.payload.get_causer()
+    }
+
+    pub fn level(&self) -> u32 {
+        self.payload.get_level()
+    }
+
+    pub fn source_snapshot(&self) -> Option<&AttributeSetSnapshot> {
+        self.payload.get_source_snapshot()
+    }
+}
+
+#[derive(Clone)]
+pub struct EffectPayload {
+    source: Entity,
+    causer: Option<Entity>,
+    level: u32,
+    source_snapshot: Option<AttributeSetSnapshot>,
+}
+
+impl EffectPayload {
+    pub fn new(source: Entity, causer: Option<Entity>, level: u32) -> Self {
+        Self {
+            source,
+            causer,
+            level,
+            source_snapshot: None,
+        }
+    }
+
+    pub fn with_source_snapshot(mut self, source_snapshot: AttributeSetSnapshot) -> Self {
+        self.source_snapshot = Some(source_snapshot);
+        self
+    }
+
+    pub fn get_source(&self) -> Entity {
+        self.source
+    }
+
+    pub fn get_causer(&self) -> Option<Entity> {
+        self.causer
+    }
+
+    pub fn get_level(&self) -> u32 {
+        self.level
+    }
+
+    pub fn get_source_snapshot(&self) -> Option<&AttributeSetSnapshot> {
+        self.source_snapshot.as_ref()
+    }
 }
 
 pub enum EffectDurationTicks {

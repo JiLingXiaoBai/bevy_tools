@@ -8,7 +8,9 @@ use crate::gameplay_effects::{
 };
 use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
 use crate::randoms::Random;
-use crate::{apply_gameplay_effect, execute_gameplay_effect_plan, prepare_gameplay_effect};
+use crate::{
+    EffectPayload, apply_gameplay_effect, execute_gameplay_effect_plan, prepare_gameplay_effect,
+};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::sync::Arc;
@@ -228,7 +230,8 @@ pub fn try_activate_ability_by_handle(
 
     for effect in ability.get_activation_effects() {
         // Activation effects are best-effort; cost/cooldown commit already decided activation success.
-        let _ = apply_gameplay_effect(source, target, effect, params, level);
+        let payload = EffectPayload::new(source, None, level);
+        let _ = apply_gameplay_effect(target, effect, params, &payload);
     }
 
     if ability.should_end_on_activation() {
@@ -277,7 +280,7 @@ pub fn can_activate_ability(
     target: Entity,
     ability: &Arc<GameplayAbility>,
     level: u32,
-    params: &AbilitySystemParams,
+    params: &mut AbilitySystemParams,
 ) -> bool {
     if let Ok(asc) = params.asc_query.get(source)
         && asc
@@ -318,7 +321,8 @@ pub fn commit_ability(
         if !cost_def.has_only_add_modifiers() {
             return false;
         }
-        let Some(plan) = prepare_gameplay_effect(source, source, cost_def, params, level) else {
+        let payload = EffectPayload::new(source, None, level);
+        let Some(plan) = prepare_gameplay_effect(source, cost_def, params, &payload) else {
             return false;
         };
         Some(plan)
@@ -327,8 +331,8 @@ pub fn commit_ability(
     };
 
     let cooldown_plan = if let Some(cooldown_def) = ability.get_cooldown() {
-        let Some(plan) = prepare_gameplay_effect(source, source, cooldown_def, params, level)
-        else {
+        let payload = EffectPayload::new(source, None, level);
+        let Some(plan) = prepare_gameplay_effect(source, cooldown_def, params, &payload) else {
             return false;
         };
         Some(plan)
@@ -426,7 +430,7 @@ fn can_pay_ability_cost(
     target: Entity,
     ability: &Arc<GameplayAbility>,
     level: u32,
-    params: &AbilitySystemParams,
+    params: &mut AbilitySystemParams,
 ) -> bool {
     let Some(cost_def) = ability.get_cost() else {
         return true;
@@ -435,21 +439,23 @@ fn can_pay_ability_cost(
         return false;
     }
 
-    let context = EffectContext {
-        source: Some(source),
-        target: Some(target),
-        attr_set_query: &params.attr_set_query.as_readonly(),
-        tag_container_query: &params.tag_container_query.as_readonly(),
-        asc_query: &params.asc_query.as_readonly(),
-        attr_set_snapshot: params.attr_set_snapshot_query.get(source).ok(),
-        level,
+    let payload = EffectPayload::new(source, None, level);
+    let cost_spec = {
+        let context = EffectContext {
+            target: Some(target),
+            payload: &payload,
+            attr_set_query: &params.attr_set_query.as_readonly(),
+            tag_container_query: &params.tag_container_query.as_readonly(),
+            asc_query: &params.asc_query.as_readonly(),
+        };
+
+        cost_def.make_spec(&context)
     };
 
-    let Ok(attr_set) = params.attr_set_query.get(source) else {
+    let Ok(mut attr_set) = params.attr_set_query.get_mut(source) else {
         return false;
     };
 
-    let cost_spec = cost_def.make_spec(&context);
     for cost in cost_spec.get_modifier_specs() {
         let Some(current_val) = attr_set.get_current_value(cost.get_id()) else {
             return false;

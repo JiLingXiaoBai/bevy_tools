@@ -2,7 +2,7 @@ use super::attribute_id_manager::AttributeId;
 use super::attribute_snapshot::AttributeSnapshot;
 use bevy::prelude::*;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct AttributeSetSnapshot {
     snapshot: Box<[Option<Box<AttributeSnapshot>>]>,
     source_entity: Entity,
