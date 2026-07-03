@@ -227,8 +227,7 @@ pub fn try_activate_ability_by_handle(
         return false;
     }
 
-    let Some(commit_plans) = prepare_ability_commit_plans(source, target, &ability, level, params)
-    else {
+    let Some(commit_plans) = prepare_ability_commit_plans(source, &ability, level, params) else {
         return false;
     };
 
@@ -380,12 +379,11 @@ fn passes_ability_activation_requirements(
 
 pub fn commit_ability(
     source: Entity,
-    _target: Entity,
     ability: &Arc<GameplayAbility>,
     level: u32,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    let Some(plans) = prepare_ability_commit_plans(source, _target, ability, level, params) else {
+    let Some(plans) = prepare_ability_commit_plans(source, ability, level, params) else {
         return false;
     };
 
@@ -399,7 +397,6 @@ struct AbilityCommitPlans {
 
 fn prepare_ability_commit_plans(
     source: Entity,
-    _target: Entity,
     ability: &Arc<GameplayAbility>,
     level: u32,
     params: &mut AbilitySystemParams,

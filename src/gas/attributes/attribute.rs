@@ -122,6 +122,11 @@ impl Attribute {
         self.make_dirty();
     }
 
+    /// Returns the total number of modifiers applied to this attribute.
+    pub fn modifier_count(&self) -> usize {
+        self.aggregator.modifier_count()
+    }
+
     pub fn make_snapshot(&self) -> AttributeSnapshot {
         AttributeSnapshot::new(self.base, self.current)
     }

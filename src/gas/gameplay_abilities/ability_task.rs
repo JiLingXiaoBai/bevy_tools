@@ -67,6 +67,7 @@ pub enum AbilityTaskOnFinishedDef {
     EndAbility,
     EmitEvent { event_id: UniqueName },
     ApplyGameplayEffectToTarget { effect: Arc<GameplayEffect> },
+    ActivateAbility { handle: AbilitySpecHandle },
 }
 
 #[derive(Clone)]
@@ -135,6 +136,13 @@ impl AbilityTaskOnFinishedDef {
                     target,
                     effect: effect.clone(),
                     level,
+                }
+            }
+            AbilityTaskOnFinishedDef::ActivateAbility { handle } => {
+                AbilityTaskOnFinished::ActivateAbility {
+                    source,
+                    target,
+                    handle: *handle,
                 }
             }
         }

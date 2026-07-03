@@ -390,38 +390,8 @@ fn execute_new_active_effect(
         });
     }
 
-    if let Some(period_spec) = plan.spec.get_period_spec() {
-        let period_ticks = period_spec.get_period_ticks();
-        let execute_on_application = period_spec.get_execute_on_applied();
-        if execute_on_application && has_modifiers {
-            let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
-                params
-                    .active_effect_target_index
-                    .remove(plan.target, effect_entity);
-                params.commands.entity(effect_entity).despawn();
-                return false;
-            };
-            apply_instant_modifiers(&mut target_attrs_mut, &plan.spec, 1);
-        }
-        if period_ticks > 0 {
-            entity_cmds.insert(ActiveEffectPeriodTicks {
-                period_ticks,
-                current_tick: 0,
-            });
-        }
-    } else if has_modifiers {
-        let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
-            params
-                .active_effect_target_index
-                .remove(plan.target, effect_entity);
-            params.commands.entity(effect_entity).despawn();
-            return false;
-        };
-        apply_duration_modifiers(&mut target_attrs_mut, &plan.spec, effect_entity, 1);
-    }
-
-    entity_cmds.set_parent_in_place(plan.target);
-
+    // Apply granted tags before modifiers so that tag failures don't leave
+    // partially-applied modifier state behind.
     if grants_tags {
         let Ok(mut target_tags) = params.tag_container_query.get_mut(plan.target) else {
             params
@@ -435,6 +405,78 @@ fn execute_new_active_effect(
             &params.tag_manager,
         );
     }
+
+    if let Some(period_spec) = plan.spec.get_period_spec() {
+        let period_ticks = period_spec.get_period_ticks();
+        let execute_on_application = period_spec.get_execute_on_applied();
+        if period_ticks == 0 {
+            // period_ticks == 0 is a no-op; fall through to duration modifiers
+            // so the effect still applies its modifiers at least once.
+            if has_modifiers {
+                let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
+                    // Roll back tags that were already applied above.
+                    if grants_tags
+                        && let Ok(mut target_tags) = params.tag_container_query.get_mut(plan.target)
+                    {
+                        target_tags.remove_tags(
+                            plan.spec.get_def_tags().get_granted_tags(),
+                            &params.tag_manager,
+                        );
+                    }
+                    params
+                        .active_effect_target_index
+                        .remove(plan.target, effect_entity);
+                    params.commands.entity(effect_entity).despawn();
+                    return false;
+                };
+                apply_duration_modifiers(&mut target_attrs_mut, &plan.spec, effect_entity, 1);
+            }
+        } else {
+            if execute_on_application && has_modifiers {
+                let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
+                    // Roll back tags that were already applied above.
+                    if grants_tags
+                        && let Ok(mut target_tags) = params.tag_container_query.get_mut(plan.target)
+                    {
+                        target_tags.remove_tags(
+                            plan.spec.get_def_tags().get_granted_tags(),
+                            &params.tag_manager,
+                        );
+                    }
+                    params
+                        .active_effect_target_index
+                        .remove(plan.target, effect_entity);
+                    params.commands.entity(effect_entity).despawn();
+                    return false;
+                };
+                apply_instant_modifiers(&mut target_attrs_mut, &plan.spec, 1);
+            }
+            entity_cmds.insert(ActiveEffectPeriodTicks {
+                period_ticks,
+                current_tick: 0,
+            });
+        }
+    } else if has_modifiers {
+        let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
+            // Roll back tags that were already applied above.
+            if grants_tags
+                && let Ok(mut target_tags) = params.tag_container_query.get_mut(plan.target)
+            {
+                target_tags.remove_tags(
+                    plan.spec.get_def_tags().get_granted_tags(),
+                    &params.tag_manager,
+                );
+            }
+            params
+                .active_effect_target_index
+                .remove(plan.target, effect_entity);
+            params.commands.entity(effect_entity).despawn();
+            return false;
+        };
+        apply_duration_modifiers(&mut target_attrs_mut, &plan.spec, effect_entity, 1);
+    }
+
+    entity_cmds.set_parent_in_place(plan.target);
 
     true
 }

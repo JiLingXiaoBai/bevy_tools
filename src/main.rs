@@ -9,67 +9,67 @@ fn main() {
         .run();
 }
 fn register_initial_tags(mut register: GameplayTagRegister) {
-    info!("--- 正在注册游戏性标签 ---");
+    info!("--- Registering gameplay tags ---");
 
-    // 注册根标签
+    // Register root tags
     let ability_tag = match register.request_or_register_tag("Ability") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
     let _effect_tag = match register.request_or_register_tag("Effect") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
     let _character_tag = match register.request_or_register_tag("Character") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
 
-    // 注册子标签 (会自动注册其父标签)
+    // Register child tags (parents are auto-registered)
     let _ability_fireball = match register.request_or_register_tag("Ability.Fireball") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
     let _ability_heal = match register.request_or_register_tag("Ability.Heal") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
 
-    // 注册多级标签
+    // Register multi-level tags
     let effect_debuff_stun = match register.request_or_register_tag("Effect.Debuff.Stun") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
     let _effect_buff_speed = match register.request_or_register_tag("Effect.Buff.Speed") {
         Ok(tag) => tag,
         Err(err) => {
-            error!("标签注册失败: {err}");
+            error!("Failed to register tag: {err}");
             return;
         }
     };
 
-    info!("标签注册完成。");
-    info!("Ability 索引: {}", ability_tag.get_bit_index_usize());
+    info!("Tag registration complete.");
+    info!("Ability index: {}", ability_tag.get_bit_index_usize());
     info!(
-        "Effect.Debuff.Stun 索引: {}",
+        "Effect.Debuff.Stun index: {}",
         effect_debuff_stun.get_bit_index_usize()
     );
 }

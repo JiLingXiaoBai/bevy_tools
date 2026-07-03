@@ -81,6 +81,14 @@ impl Aggregator {
         self.override_value = None;
     }
 
+    /// Returns the total number of modifiers across all operation slots.
+    pub fn modifier_count(&self) -> usize {
+        self.additive.len()
+            + self.percent_additive.len()
+            + self.multiplicative.len()
+            + usize::from(self.override_value.is_some())
+    }
+
     pub fn evaluate(&self, base_value: f64) -> f64 {
         (self.executor)(self, base_value)
     }

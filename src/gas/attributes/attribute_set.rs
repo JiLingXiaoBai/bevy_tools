@@ -116,8 +116,11 @@ impl AttributeSet {
     pub fn remove_modifiers(&mut self, handle: ActiveEffectHandle) {
         let mut removed_from_any = false;
         for attr in self.attributes.iter_mut().flatten() {
+            let len_before = attr.modifier_count();
             attr.remove_modifier_by_handle(handle);
-            removed_from_any = true;
+            if attr.modifier_count() != len_before {
+                removed_from_any = true;
+            }
         }
         if removed_from_any {
             self.mark_dirty();
@@ -134,8 +137,11 @@ impl AttributeSet {
             let index = id.to_index();
             debug_assert!(index < self.attributes.len());
             if let Some(attr) = &mut self.attributes[index] {
+                let len_before = attr.modifier_count();
                 attr.remove_modifier_by_handle(handle);
-                removed_from_any = true;
+                if attr.modifier_count() != len_before {
+                    removed_from_any = true;
+                }
             }
         }
         if removed_from_any {
