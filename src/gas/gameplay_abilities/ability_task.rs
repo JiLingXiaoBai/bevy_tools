@@ -1,8 +1,10 @@
 use crate::ability_system::AbilityActivationQueue;
 use crate::gameplay_abilities::{AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle};
+use crate::gameplay_effects::{GameplayEffect, GameplayEffectApplicationQueue};
 use bevy::prelude::*;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone)]
 pub enum AbilityTaskOnFinished {
     None,
     EndAbility,
@@ -11,6 +13,12 @@ pub enum AbilityTaskOnFinished {
         target: Entity,
         handle: AbilitySpecHandle,
     },
+    ApplyGameplayEffect {
+        source: Entity,
+        target: Entity,
+        effect: Arc<GameplayEffect>,
+        level: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -18,7 +26,7 @@ pub enum AbilityTaskKind {
     WaitTicks { remaining_ticks: u32 },
 }
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Clone)]
 pub struct AbilityTask {
     active_ability: ActiveAbilityHandle,
     kind: AbilityTaskKind,
@@ -48,8 +56,8 @@ impl AbilityTask {
         self.kind
     }
 
-    pub fn get_on_finished(&self) -> AbilityTaskOnFinished {
-        self.on_finished
+    pub fn get_on_finished(&self) -> &AbilityTaskOnFinished {
+        &self.on_finished
     }
 
     fn tick(&mut self) -> bool {
@@ -69,13 +77,14 @@ pub fn tick_ability_tasks_system(
     mut task_query: Query<(Entity, &mut AbilityTask)>,
     mut active_ability_query: Query<&mut crate::gameplay_abilities::ActiveGameplayAbility>,
     mut activation_queue: ResMut<AbilityActivationQueue>,
+    mut effect_queue: ResMut<GameplayEffectApplicationQueue>,
 ) {
     for (task_entity, mut task) in task_query.iter_mut() {
         if !task.tick() {
             continue;
         }
 
-        match task.get_on_finished() {
+        match task.get_on_finished().clone() {
             AbilityTaskOnFinished::None => {}
             AbilityTaskOnFinished::EndAbility => {
                 if let Ok(mut active_ability) =
@@ -90,6 +99,14 @@ pub fn tick_ability_tasks_system(
                 handle,
             } => {
                 activation_queue.push_activation(source, target, handle);
+            }
+            AbilityTaskOnFinished::ApplyGameplayEffect {
+                source,
+                target,
+                effect,
+                level,
+            } => {
+                effect_queue.push_application(source, target, effect, level);
             }
         }
 
