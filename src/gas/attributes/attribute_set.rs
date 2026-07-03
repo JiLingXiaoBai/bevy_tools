@@ -10,19 +10,15 @@ pub type AttributePostExecute = fn(&mut AttributeSet, AttributeId, f64, f64);
 
 #[derive(Component)]
 pub struct AttributeSet {
-    attributes: Box<[Option<Box<Attribute>>]>,
+    attributes: Vec<Option<Attribute>>,
     post_execute: Option<AttributePostExecute>,
     dirty: bool,
 }
 
 impl Default for AttributeSet {
     fn default() -> Self {
-        let mut attrs = Vec::with_capacity(ATTRIBUTE_SET_SIZE);
-        for _ in 0..ATTRIBUTE_SET_SIZE {
-            attrs.push(None);
-        }
         Self {
-            attributes: attrs.into_boxed_slice(),
+            attributes: vec![None; ATTRIBUTE_SET_SIZE],
             post_execute: None,
             dirty: true,
         }
@@ -39,7 +35,7 @@ impl AttributeSet {
     ) {
         let index = id.to_index();
         debug_assert!(index < self.attributes.len());
-        let mut attr = Box::new(Attribute::default());
+        let mut attr = Attribute::default();
         attr.init(base_value, executor, clamp);
         self.attributes[index] = Some(attr);
         self.mark_dirty();
@@ -128,6 +124,25 @@ impl AttributeSet {
         }
     }
 
+    pub fn remove_modifiers_for_attributes(
+        &mut self,
+        handle: ActiveEffectHandle,
+        ids: impl IntoIterator<Item = AttributeId>,
+    ) {
+        let mut removed_from_any = false;
+        for id in ids {
+            let index = id.to_index();
+            debug_assert!(index < self.attributes.len());
+            if let Some(attr) = &mut self.attributes[index] {
+                attr.remove_modifier_by_handle(handle);
+                removed_from_any = true;
+            }
+        }
+        if removed_from_any {
+            self.mark_dirty();
+        }
+    }
+
     pub fn make_snapshot(&mut self, source_entity: Entity) -> AttributeSetSnapshot {
         self.recalculate_all();
 
@@ -148,7 +163,9 @@ impl AttributeSet {
     }
 }
 
-pub fn recalculate_attribute_sets_system(mut query: Query<&mut AttributeSet>) {
+pub fn recalculate_attribute_sets_system(
+    mut query: Query<&mut AttributeSet, Changed<AttributeSet>>,
+) {
     for mut attr_set in query.iter_mut() {
         attr_set.recalculate_all();
     }

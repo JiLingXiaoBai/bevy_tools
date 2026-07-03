@@ -5,11 +5,61 @@ use super::gameplay_effect::{
 use super::gameplay_effect_spec::{EffectDurationTicksSpec, GameplayEffectSpec};
 use crate::ability_system::AbilitySystemParams;
 use crate::attributes::AttributeSet;
-use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
+use crate::gameplay_tags::{
+    GameplayTag, GameplayTagContainer, GameplayTagManager, tag_bits_from_tags_with_manager,
+};
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use std::sync::Arc;
 
 pub type ActiveEffectHandle = Entity;
+
+#[derive(Resource, Default)]
+pub struct ActiveGameplayEffectTargetIndex {
+    by_target: HashMap<Entity, Vec<ActiveEffectHandle>>,
+    by_handle: HashMap<ActiveEffectHandle, Entity>,
+}
+
+impl ActiveGameplayEffectTargetIndex {
+    pub fn add(&mut self, target: Entity, handle: ActiveEffectHandle) {
+        self.by_target.entry(target).or_default().push(handle);
+        self.by_handle.insert(handle, target);
+    }
+
+    pub fn remove(&mut self, target: Entity, handle: ActiveEffectHandle) {
+        let Some(handles) = self.by_target.get_mut(&target) else {
+            self.by_handle.remove(&handle);
+            return;
+        };
+        handles.retain(|&candidate| candidate != handle);
+        if handles.is_empty() {
+            self.by_target.remove(&target);
+        }
+        self.by_handle.remove(&handle);
+    }
+
+    pub fn remove_by_handle(&mut self, handle: ActiveEffectHandle) {
+        if let Some(target) = self.by_handle.get(&handle).copied() {
+            self.remove(target, handle);
+        }
+    }
+
+    pub fn handles_for(&self, target: Entity) -> &[ActiveEffectHandle] {
+        self.by_target
+            .get(&target)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+}
+
+pub fn reconcile_active_effect_target_index_system(
+    mut removed_effects: RemovedComponents<ActiveGameplayEffect>,
+    mut target_index: ResMut<ActiveGameplayEffectTargetIndex>,
+) {
+    for handle in removed_effects.read() {
+        target_index.remove_by_handle(handle);
+    }
+}
 
 #[derive(Component, Clone)]
 pub struct ActiveGameplayEffect {
@@ -57,6 +107,16 @@ impl ActiveGameplayEffect {
 
     pub fn set_inhibited(&mut self, inhibited: bool) {
         self.inhibited = inhibited;
+    }
+}
+
+impl GameplayEffectApplicationPlan {
+    pub fn get_modifier_specs(&self) -> &[crate::modifiers::ModifierSpec] {
+        self.spec.get_modifier_specs()
+    }
+
+    pub fn is_instant(&self) -> bool {
+        matches!(self.kind, GameplayEffectApplicationKind::Instant)
     }
 }
 
@@ -127,19 +187,26 @@ pub fn prepare_gameplay_effect(
         return None;
     }
 
-    let needs_attribute_set = duration_spec.is_instant()
-        || spec.get_period_spec().is_none()
-        || spec
-            .get_period_spec()
-            .as_ref()
-            .is_some_and(|period| period.get_execute_on_applied() || period.get_period_ticks() > 0);
+    let has_modifiers = !spec.get_modifier_specs().is_empty();
+    let needs_attribute_set = has_modifiers
+        && (duration_spec.is_instant()
+            || spec.get_period_spec().is_none()
+            || spec.get_period_spec().as_ref().is_some_and(|period| {
+                period.get_execute_on_applied() || period.get_period_ticks() > 0
+            }));
     if needs_attribute_set && params.attr_set_query.get(target).is_err() {
+        return None;
+    }
+
+    let grants_tags = !spec.get_def_tags().get_granted_tags().is_empty();
+    if grants_tags && params.tag_container_query.get(target).is_err() {
         return None;
     }
 
     let removed_effects = collect_active_effects_with_tags_for_params(
         target,
         incoming_tags.get_remove_effects_with_tags(),
+        &params.active_effect_target_index,
         &mut params.active_effect_query,
         &params.tag_manager,
     );
@@ -149,6 +216,7 @@ pub fn prepare_gameplay_effect(
         target,
         &spec,
         &mut params.active_effect_query,
+        &params.active_effect_target_index,
         &removed_effects,
     ) {
         let stacking_policy = spec.get_stacking_policy();
@@ -209,6 +277,7 @@ pub fn execute_gameplay_effect_plan(
         &mut params.attr_set_query,
         &mut params.tag_container_query,
         &params.tag_manager,
+        &mut params.active_effect_target_index,
     );
 
     match plan.kind {
@@ -281,7 +350,8 @@ fn execute_stack_existing_effect(
         let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(existing_target) else {
             return false;
         };
-        target_attrs_mut.remove_modifiers(handle);
+        target_attrs_mut
+            .remove_modifiers_for_attributes(handle, existing_spec.get_modified_attribute_ids());
         apply_duration_modifiers(
             &mut target_attrs_mut,
             &existing_spec,
@@ -297,6 +367,12 @@ fn execute_new_active_effect(
     plan: &GameplayEffectApplicationPlan,
     params: &mut AbilitySystemParams,
 ) -> bool {
+    let has_modifiers = !plan.spec.get_modifier_specs().is_empty();
+    let grants_tags = !plan.spec.get_def_tags().get_granted_tags().is_empty();
+    if grants_tags && params.tag_container_query.get(plan.target).is_err() {
+        return false;
+    }
+
     let mut entity_cmds = params.commands.spawn(ActiveGameplayEffect::new(
         plan.spec.clone(),
         plan.source,
@@ -304,6 +380,9 @@ fn execute_new_active_effect(
     ));
 
     let effect_entity = entity_cmds.id();
+    params
+        .active_effect_target_index
+        .add(plan.target, effect_entity);
 
     if let EffectDurationTicksSpec::DurationTicks(duration) = plan.spec.get_duration_spec() {
         entity_cmds.insert(ActiveEffectDurationTicks {
@@ -314,8 +393,11 @@ fn execute_new_active_effect(
     if let Some(period_spec) = plan.spec.get_period_spec() {
         let period_ticks = period_spec.get_period_ticks();
         let execute_on_application = period_spec.get_execute_on_applied();
-        if execute_on_application {
+        if execute_on_application && has_modifiers {
             let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
+                params
+                    .active_effect_target_index
+                    .remove(plan.target, effect_entity);
                 params.commands.entity(effect_entity).despawn();
                 return false;
             };
@@ -327,8 +409,11 @@ fn execute_new_active_effect(
                 current_tick: 0,
             });
         }
-    } else {
+    } else if has_modifiers {
         let Ok(mut target_attrs_mut) = params.attr_set_query.get_mut(plan.target) else {
+            params
+                .active_effect_target_index
+                .remove(plan.target, effect_entity);
             params.commands.entity(effect_entity).despawn();
             return false;
         };
@@ -337,37 +422,36 @@ fn execute_new_active_effect(
 
     entity_cmds.set_parent_in_place(plan.target);
 
-    let Ok(mut target_tags) = params.tag_container_query.get_mut(plan.target) else {
-        params.commands.entity(effect_entity).despawn();
-        return false;
-    };
-    target_tags.add_tags(
-        plan.spec.get_def_tags().get_granted_tags(),
-        &params.tag_manager,
-    );
+    if grants_tags {
+        let Ok(mut target_tags) = params.tag_container_query.get_mut(plan.target) else {
+            params
+                .active_effect_target_index
+                .remove(plan.target, effect_entity);
+            params.commands.entity(effect_entity).despawn();
+            return false;
+        };
+        target_tags.add_tags(
+            plan.spec.get_def_tags().get_granted_tags(),
+            &params.tag_manager,
+        );
+    }
 
     true
 }
 
-pub fn remove_active_effect(
-    handle: ActiveEffectHandle,
-    commands: &mut Commands,
-    active_effect_query: &Query<(Entity, &ActiveGameplayEffect)>,
-    attr_query: &mut Query<&mut AttributeSet>,
-    tag_query: &mut Query<&mut GameplayTagContainer>,
-    tag_manager: &Res<GameplayTagManager>,
-) -> bool {
-    let Ok((_, effect)) = active_effect_query.get(handle) else {
+pub fn remove_active_effect(handle: ActiveEffectHandle, params: &mut AbilitySystemParams) -> bool {
+    let Ok((_, effect, _, _)) = params.active_effect_query.get_mut(handle) else {
         return false;
     };
     let effect = effect.clone();
     cleanup_active_gameplay_effect(
-        commands,
+        &mut params.commands,
         handle,
         &effect,
-        attr_query,
-        tag_query,
-        tag_manager,
+        &mut params.attr_set_query,
+        &mut params.tag_container_query,
+        &params.tag_manager,
+        &mut params.active_effect_target_index,
     );
     true
 }
@@ -375,38 +459,39 @@ pub fn remove_active_effect(
 pub fn remove_active_effects_with_tags(
     target: Entity,
     tags: &[GameplayTag],
-    commands: &mut Commands,
-    active_effect_query: &Query<(Entity, &ActiveGameplayEffect)>,
-    attr_query: &mut Query<&mut AttributeSet>,
-    tag_query: &mut Query<&mut GameplayTagContainer>,
-    tag_manager: &Res<GameplayTagManager>,
+    params: &mut AbilitySystemParams,
 ) -> usize {
-    let handles = collect_active_effects_with_tags(target, tags, active_effect_query, tag_manager);
+    let handles = collect_active_effects_with_tags_for_params(
+        target,
+        tags,
+        &params.active_effect_target_index,
+        &mut params.active_effect_query,
+        &params.tag_manager,
+    );
     let removed_count = handles.len();
-    remove_collected_active_effects(
+    remove_collected_active_effects_for_params(
         &handles,
-        active_effect_query,
-        commands,
-        attr_query,
-        tag_query,
-        tag_manager,
+        &mut params.active_effect_query,
+        &mut params.commands,
+        &mut params.attr_set_query,
+        &mut params.tag_container_query,
+        &params.tag_manager,
+        &mut params.active_effect_target_index,
     );
     removed_count
 }
 
 pub fn get_active_effects_on_target(
     target: Entity,
-    active_effect_query: &Query<(Entity, &ActiveGameplayEffect)>,
+    target_index: &ActiveGameplayEffectTargetIndex,
 ) -> Vec<ActiveEffectHandle> {
-    active_effect_query
-        .iter()
-        .filter_map(|(handle, effect)| (effect.get_target() == target).then_some(handle))
-        .collect()
+    target_index.handles_for(target).to_vec()
 }
 
 pub fn has_active_effect_with_tags(
     target: Entity,
     tags: &[GameplayTag],
+    target_index: &ActiveGameplayEffectTargetIndex,
     active_effect_query: &Query<(Entity, &ActiveGameplayEffect)>,
     tag_manager: &Res<GameplayTagManager>,
 ) -> bool {
@@ -414,9 +499,16 @@ pub fn has_active_effect_with_tags(
         return false;
     }
 
-    active_effect_query.iter().any(|(_, effect)| {
-        effect.get_target() == target && active_effect_has_any_tags(effect, tags, tag_manager)
-    })
+    target_index
+        .handles_for(target)
+        .iter()
+        .copied()
+        .any(|handle| {
+            let Ok((_, effect)) = active_effect_query.get(handle) else {
+                return false;
+            };
+            effect.get_target() == target && active_effect_has_any_tags(effect, tags, tag_manager)
+        })
 }
 
 pub fn cleanup_active_gameplay_effect(
@@ -426,9 +518,13 @@ pub fn cleanup_active_gameplay_effect(
     attr_query: &mut Query<&mut AttributeSet>,
     tag_query: &mut Query<&mut GameplayTagContainer>,
     tag_manager: &Res<GameplayTagManager>,
+    target_index: &mut ActiveGameplayEffectTargetIndex,
 ) {
     if let Ok(mut attr_set) = attr_query.get_mut(effect.get_target()) {
-        attr_set.remove_modifiers(handle);
+        attr_set.remove_modifiers_for_attributes(
+            handle,
+            effect.get_spec().get_modified_attribute_ids(),
+        );
     }
 
     if let Ok(mut tag_container) = tag_query.get_mut(effect.get_target()) {
@@ -439,48 +535,7 @@ pub fn cleanup_active_gameplay_effect(
     }
 
     commands.entity(handle).despawn();
-}
-
-fn expire_active_gameplay_effect(
-    commands: &mut Commands,
-    handle: ActiveEffectHandle,
-    duration: &mut ActiveEffectDurationTicks,
-    effect: &mut ActiveGameplayEffect,
-    attr_query: &mut Query<&mut AttributeSet>,
-    tag_query: &mut Query<&mut GameplayTagContainer>,
-    tag_manager: &Res<GameplayTagManager>,
-) {
-    if matches!(
-        effect
-            .get_spec()
-            .get_stacking_policy()
-            .get_expiration_policy(),
-        StackExpirationPolicy::RemoveSingleStack
-    ) && effect.get_stack_count() > 1
-    {
-        effect.set_stack_count(effect.get_stack_count() - 1);
-        if let EffectDurationTicksSpec::DurationTicks(duration_ticks) =
-            effect.get_spec().get_duration_spec()
-        {
-            duration.remain_ticks = *duration_ticks;
-        }
-
-        if !effect.is_inhibited()
-            && effect.get_spec().get_period_spec().is_none()
-            && let Ok(mut attr_set) = attr_query.get_mut(effect.get_target())
-        {
-            attr_set.remove_modifiers(handle);
-            apply_duration_modifiers(
-                &mut attr_set,
-                effect.get_spec(),
-                handle,
-                effect.get_stack_count(),
-            );
-        }
-        return;
-    }
-
-    cleanup_active_gameplay_effect(commands, handle, effect, attr_query, tag_query, tag_manager);
+    target_index.remove(effect.get_target(), handle);
 }
 
 pub fn tick_effect_duration_system(
@@ -493,6 +548,7 @@ pub fn tick_effect_duration_system(
     mut attr_query: Query<&mut AttributeSet>,
     mut tag_query: Query<&mut GameplayTagContainer>,
     tag_manager: Res<GameplayTagManager>,
+    mut target_index: ResMut<ActiveGameplayEffectTargetIndex>,
 ) {
     for (entity, mut duration, mut effect) in query.iter_mut() {
         if duration.remain_ticks > 0 {
@@ -500,14 +556,48 @@ pub fn tick_effect_duration_system(
         }
 
         if duration.remain_ticks == 0 {
-            expire_active_gameplay_effect(
+            if matches!(
+                effect
+                    .get_spec()
+                    .get_stacking_policy()
+                    .get_expiration_policy(),
+                StackExpirationPolicy::RemoveSingleStack
+            ) && effect.get_stack_count() > 1
+            {
+                let new_stack_count = effect.get_stack_count() - 1;
+                effect.set_stack_count(new_stack_count);
+                if let EffectDurationTicksSpec::DurationTicks(duration_ticks) =
+                    effect.get_spec().get_duration_spec()
+                {
+                    duration.remain_ticks = *duration_ticks;
+                }
+
+                if !effect.is_inhibited()
+                    && effect.get_spec().get_period_spec().is_none()
+                    && let Ok(mut attr_set) = attr_query.get_mut(effect.get_target())
+                {
+                    attr_set.remove_modifiers_for_attributes(
+                        entity,
+                        effect.get_spec().get_modified_attribute_ids(),
+                    );
+                    apply_duration_modifiers(
+                        &mut attr_set,
+                        effect.get_spec(),
+                        entity,
+                        effect.get_stack_count(),
+                    );
+                }
+                continue;
+            }
+
+            cleanup_active_gameplay_effect(
                 &mut commands,
                 entity,
-                &mut duration,
-                &mut effect,
+                &effect,
                 &mut attr_query,
                 &mut tag_query,
                 &tag_manager,
+                &mut target_index,
             );
         }
     }
@@ -519,6 +609,7 @@ pub fn update_active_effect_tag_requirements_system(
     mut attr_query: Query<&mut AttributeSet>,
     mut tag_query: Query<&mut GameplayTagContainer>,
     tag_manager: Res<GameplayTagManager>,
+    mut target_index: ResMut<ActiveGameplayEffectTargetIndex>,
 ) {
     for (handle, mut effect) in active_effect_query.iter_mut() {
         if should_remove_active_effect(&effect, &tag_query) {
@@ -529,6 +620,7 @@ pub fn update_active_effect_tag_requirements_system(
                 &mut attr_query,
                 &mut tag_query,
                 &tag_manager,
+                &mut target_index,
             );
             continue;
         }
@@ -587,6 +679,7 @@ fn find_stackable_active_effect(
         Option<&mut ActiveEffectDurationTicks>,
         Option<&mut ActiveEffectPeriodTicks>,
     )>,
+    target_index: &ActiveGameplayEffectTargetIndex,
     ignored_handles: &[ActiveEffectHandle],
 ) -> Option<(ActiveEffectHandle, u32)> {
     let stacking_type = spec.get_stacking_policy().get_stacking_type();
@@ -594,11 +687,18 @@ fn find_stackable_active_effect(
         return None;
     }
 
-    active_effect_query
-        .iter_mut()
-        .find_map(|(handle, effect, _, _)| {
-            (!ignored_handles.contains(&handle)
-                && effect.get_target() == target
+    target_index
+        .handles_for(target)
+        .iter()
+        .copied()
+        .find_map(|handle| {
+            if ignored_handles.contains(&handle) {
+                return None;
+            }
+            let Ok((_, effect, _, _)) = active_effect_query.get_mut(handle) else {
+                return None;
+            };
+            (effect.get_target() == target
                 && spec.is_same_def(effect.get_spec())
                 && match stacking_type {
                     StackingType::None => false,
@@ -633,22 +733,28 @@ fn is_blocked_by_application_immunity(
     params: &mut AbilitySystemParams,
 ) -> bool {
     let source_tags = params.tag_container_query.get(source).ok();
-    let incoming_asset_tags = incoming_tags.get_asset_tags();
+    let incoming_asset_bits =
+        tag_bits_from_tags_with_manager(incoming_tags.get_asset_tags(), &params.tag_manager);
 
     params
-        .active_effect_query
-        .iter_mut()
-        .filter(|(_, active_effect, _, _)| {
-            active_effect.get_target() == target && !active_effect.is_inhibited()
-        })
-        .any(|(_, active_effect, _, _)| {
+        .active_effect_target_index
+        .handles_for(target)
+        .to_vec()
+        .into_iter()
+        .any(|handle| {
+            let Ok((_, active_effect, _, _)) = params.active_effect_query.get_mut(handle) else {
+                return false;
+            };
+            if active_effect.is_inhibited() {
+                return false;
+            }
             active_effect
                 .get_spec()
                 .get_def_tags()
                 .get_granted_application_immunity()
                 .iter()
                 .any(|immunity| {
-                    immunity.matches(source_tags, incoming_asset_tags, &params.tag_manager)
+                    immunity.matches_tag_bits(source_tags, incoming_asset_bits.as_ref())
                 })
         })
 }
@@ -692,7 +798,10 @@ fn inhibit_active_effect(
     tag_manager: &Res<GameplayTagManager>,
 ) {
     if let Ok(mut attr_set) = attr_query.get_mut(effect.get_target()) {
-        attr_set.remove_modifiers(handle);
+        attr_set.remove_modifiers_for_attributes(
+            handle,
+            effect.get_spec().get_modified_attribute_ids(),
+        );
     }
 
     if let Ok(mut tag_container) = tag_query.get_mut(effect.get_target()) {
@@ -733,28 +842,10 @@ fn uninhibit_active_effect(
     effect.set_inhibited(false);
 }
 
-fn collect_active_effects_with_tags(
-    target: Entity,
-    tags: &[GameplayTag],
-    active_effect_query: &Query<(Entity, &ActiveGameplayEffect)>,
-    tag_manager: &Res<GameplayTagManager>,
-) -> Vec<ActiveEffectHandle> {
-    if tags.is_empty() {
-        return Vec::new();
-    }
-
-    active_effect_query
-        .iter()
-        .filter_map(|(handle, effect)| {
-            (effect.get_target() == target && active_effect_has_any_tags(effect, tags, tag_manager))
-                .then_some(handle)
-        })
-        .collect()
-}
-
 fn collect_active_effects_with_tags_for_params(
     target: Entity,
     tags: &[GameplayTag],
+    target_index: &ActiveGameplayEffectTargetIndex,
     active_effect_query: &mut Query<(
         Entity,
         &mut ActiveGameplayEffect,
@@ -767,38 +858,17 @@ fn collect_active_effects_with_tags_for_params(
         return Vec::new();
     }
 
-    active_effect_query
-        .iter_mut()
-        .filter_map(|(handle, effect, _, _)| {
-            (effect.get_target() == target
-                && active_effect_has_any_tags(&effect, tags, tag_manager))
-            .then_some(handle)
+    target_index
+        .handles_for(target)
+        .iter()
+        .copied()
+        .filter(|&handle| {
+            let Ok((_, effect, _, _)) = active_effect_query.get_mut(handle) else {
+                return false;
+            };
+            effect.get_target() == target && active_effect_has_any_tags(&effect, tags, tag_manager)
         })
         .collect()
-}
-
-fn remove_collected_active_effects(
-    handles: &[ActiveEffectHandle],
-    active_effect_query: &Query<(Entity, &ActiveGameplayEffect)>,
-    commands: &mut Commands,
-    attr_query: &mut Query<&mut AttributeSet>,
-    tag_query: &mut Query<&mut GameplayTagContainer>,
-    tag_manager: &Res<GameplayTagManager>,
-) {
-    for &handle in handles {
-        let Ok((_, effect)) = active_effect_query.get(handle) else {
-            continue;
-        };
-        let effect = effect.clone();
-        cleanup_active_gameplay_effect(
-            commands,
-            handle,
-            &effect,
-            attr_query,
-            tag_query,
-            tag_manager,
-        );
-    }
 }
 
 fn remove_collected_active_effects_for_params(
@@ -813,6 +883,7 @@ fn remove_collected_active_effects_for_params(
     attr_query: &mut Query<&mut AttributeSet>,
     tag_query: &mut Query<&mut GameplayTagContainer>,
     tag_manager: &Res<GameplayTagManager>,
+    target_index: &mut ActiveGameplayEffectTargetIndex,
 ) {
     for &handle in handles {
         let Ok((_, effect, _, _)) = active_effect_query.get_mut(handle) else {
@@ -826,6 +897,7 @@ fn remove_collected_active_effects_for_params(
             attr_query,
             tag_query,
             tag_manager,
+            target_index,
         );
     }
 }
@@ -873,10 +945,160 @@ fn active_effect_has_any_tags(
     tags: &[GameplayTag],
     tag_manager: &Res<GameplayTagManager>,
 ) -> bool {
-    let mut effect_tags = GameplayTagContainer::default();
-    effect_tags.add_tags(
+    let Some(effect_bits) = tag_bits_from_tags_with_manager(
         effect.get_spec().get_def_tags().get_asset_tags(),
         tag_manager,
-    );
-    effect_tags.has_any(tags)
+    ) else {
+        return false;
+    };
+    let Some(query_bits) = tag_bits_from_tags_with_manager(tags, tag_manager) else {
+        return false;
+    };
+
+    effect_bits
+        .iter()
+        .zip(query_bits.iter())
+        .any(|(a, b)| (a & b) != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::attributes::{AttributeClamp, AttributeIdManager};
+    use crate::modifiers::{Modifier, ModifierMagnitude, ModifierOperation};
+    use crate::{
+        EffectDurationTicks, EffectTags, GameplayAbilitySystemPlugin, GameplayTagManager,
+        StackingPolicy, TagRequirements, UniqueNamePool,
+    };
+    use bevy::ecs::system::RunSystemOnce;
+    use std::sync::Arc;
+
+    #[derive(Resource)]
+    struct EffectUnderTest(Arc<GameplayEffect>);
+
+    #[derive(Resource)]
+    struct TargetUnderTest(Entity);
+
+    #[derive(Resource, Default)]
+    struct ApplyResult(bool);
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, GameplayAbilitySystemPlugin));
+        app.init_resource::<ApplyResult>();
+        app
+    }
+
+    fn register_tag(app: &mut App, name: &str) -> GameplayTag {
+        let unique_name = {
+            let mut names = app.world_mut().resource_mut::<UniqueNamePool>();
+            names.new_name(name)
+        };
+
+        app.world_mut()
+            .resource_mut::<GameplayTagManager>()
+            .register_tag_internal(unique_name, None)
+            .unwrap()
+    }
+
+    fn register_attribute(app: &mut App, name: &str) -> crate::attributes::AttributeId {
+        let unique_name = {
+            let mut names = app.world_mut().resource_mut::<UniqueNamePool>();
+            names.new_name(name)
+        };
+
+        app.world_mut()
+            .resource_mut::<AttributeIdManager>()
+            .register_id_internal(unique_name)
+            .unwrap()
+    }
+
+    fn effect_tags(granted_tags: Vec<GameplayTag>) -> EffectTags {
+        EffectTags::new(
+            Vec::new(),
+            granted_tags,
+            TagRequirements::default(),
+            TagRequirements::default(),
+            TagRequirements::default(),
+            TagRequirements::default(),
+            TagRequirements::default(),
+            TagRequirements::default(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    fn apply_effect_system(
+        effect: Res<EffectUnderTest>,
+        target: Res<TargetUnderTest>,
+        mut params: AbilitySystemParams,
+        mut result: ResMut<ApplyResult>,
+    ) {
+        let payload = EffectPayload::new(target.0, None, 1);
+        result.0 = apply_gameplay_effect(target.0, &effect.0, &mut params, &payload);
+    }
+
+    #[test]
+    fn tag_only_active_effect_does_not_require_attribute_set() {
+        let mut app = test_app();
+        let tag = register_tag(&mut app, "State.Stunned");
+        let target = app.world_mut().spawn(GameplayTagContainer::default()).id();
+        let effect = Arc::new(GameplayEffect::new(
+            Vec::new(),
+            EffectDurationTicks::Infinite,
+            None,
+            1.0,
+            StackingPolicy::non_stacking(),
+            effect_tags(vec![tag]),
+        ));
+
+        app.insert_resource(TargetUnderTest(target));
+        app.insert_resource(EffectUnderTest(effect));
+        app.world_mut()
+            .run_system_once(apply_effect_system)
+            .unwrap();
+
+        assert!(app.world().resource::<ApplyResult>().0);
+        assert!(
+            app.world()
+                .entity(target)
+                .get::<GameplayTagContainer>()
+                .unwrap()
+                .has_tag(&tag)
+        );
+        assert!(app.world().entity(target).get::<AttributeSet>().is_none());
+    }
+
+    #[test]
+    fn failed_effect_application_does_not_leave_duration_modifier() {
+        let mut app = test_app();
+        let tag = register_tag(&mut app, "State.Buffed");
+        let health = register_attribute(&mut app, "Health");
+        let mut attributes = AttributeSet::default();
+        attributes.initialize_attribute(health, 10.0, None, AttributeClamp::None);
+        let target = app.world_mut().spawn(attributes).id();
+        let effect = Arc::new(GameplayEffect::new(
+            vec![Modifier::new(
+                health,
+                ModifierOperation::Add,
+                ModifierMagnitude::Flat(5.0),
+            )],
+            EffectDurationTicks::Infinite,
+            None,
+            1.0,
+            StackingPolicy::non_stacking(),
+            effect_tags(vec![tag]),
+        ));
+
+        app.insert_resource(TargetUnderTest(target));
+        app.insert_resource(EffectUnderTest(effect));
+        app.world_mut()
+            .run_system_once(apply_effect_system)
+            .unwrap();
+
+        assert!(!app.world().resource::<ApplyResult>().0);
+        let mut attributes = app.world_mut().entity_mut(target);
+        let mut attributes = attributes.get_mut::<AttributeSet>().unwrap();
+        assert_eq!(attributes.get_current_value(health), Some(10.0));
+    }
 }

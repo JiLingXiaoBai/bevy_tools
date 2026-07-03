@@ -4,14 +4,18 @@ use crate::gameplay_abilities::{
     ActiveGameplayAbility, GameplayAbility, GameplayAbilitySpec,
 };
 use crate::gameplay_effects::{
-    ActiveEffectDurationTicks, ActiveEffectPeriodTicks, ActiveGameplayEffect, EffectContext,
+    ActiveEffectDurationTicks, ActiveEffectPeriodTicks, ActiveGameplayEffect,
+    ActiveGameplayEffectTargetIndex, EffectContext, GameplayEffectApplicationPlan,
 };
-use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
+use crate::gameplay_tags::{
+    GameplayTag, GameplayTagContainer, GameplayTagManager, tag_bits_from_tags_with_manager,
+};
 use crate::randoms::Random;
 use crate::{
     EffectPayload, apply_gameplay_effect, execute_gameplay_effect_plan, prepare_gameplay_effect,
 };
 use bevy::ecs::system::SystemParam;
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use std::sync::Arc;
 
@@ -24,6 +28,7 @@ pub struct AbilitySystemParams<'w, 's> {
     pub tag_container_query: Query<'w, 's, &'static mut GameplayTagContainer>,
     pub asc_query: Query<'w, 's, &'static mut AbilitySystemComponent>,
     pub attr_set_snapshot_query: Query<'w, 's, &'static AttributeSetSnapshot>,
+    pub active_effect_target_index: ResMut<'w, ActiveGameplayEffectTargetIndex>,
     pub active_effect_query: Query<
         'w,
         's,
@@ -42,6 +47,7 @@ pub struct AbilitySystemParams<'w, 's> {
 pub struct AbilitySystemComponent {
     next_ability_handle: u32,
     abilities: Vec<GameplayAbilitySpec>,
+    ability_indices: HashMap<AbilitySpecHandle, usize>,
     blocked_ability_tags: GameplayTagContainer,
 }
 
@@ -54,8 +60,10 @@ impl AbilitySystemComponent {
     ) -> AbilitySpecHandle {
         let handle = AbilitySpecHandle::new(self.next_ability_handle);
         self.next_ability_handle = self.next_ability_handle.wrapping_add(1);
+        let index = self.abilities.len();
         self.abilities
             .push(GameplayAbilitySpec::new(handle, ability, level, input_id));
+        self.ability_indices.insert(handle, index);
         handle
     }
 
@@ -69,7 +77,11 @@ impl AbilitySystemComponent {
 
         let old_len = self.abilities.len();
         self.abilities.retain(|spec| spec.get_handle() != handle);
-        old_len != self.abilities.len()
+        let removed = old_len != self.abilities.len();
+        if removed {
+            self.rebuild_ability_indices();
+        }
+        removed
     }
 
     pub fn get_ability_specs(&self) -> &[GameplayAbilitySpec] {
@@ -81,18 +93,25 @@ impl AbilitySystemComponent {
     }
 
     pub fn find_ability_spec(&self, handle: AbilitySpecHandle) -> Option<&GameplayAbilitySpec> {
-        self.abilities
-            .iter()
-            .find(|spec| spec.get_handle() == handle)
+        self.ability_indices
+            .get(&handle)
+            .and_then(|&index| self.abilities.get(index))
     }
 
     fn find_ability_spec_mut(
         &mut self,
         handle: AbilitySpecHandle,
     ) -> Option<&mut GameplayAbilitySpec> {
-        self.abilities
-            .iter_mut()
-            .find(|spec| spec.get_handle() == handle)
+        self.ability_indices
+            .get(&handle)
+            .and_then(|&index| self.abilities.get_mut(index))
+    }
+
+    fn rebuild_ability_indices(&mut self) {
+        self.ability_indices.clear();
+        for (index, spec) in self.abilities.iter().enumerate() {
+            self.ability_indices.insert(spec.get_handle(), index);
+        }
     }
 
     fn start_ability(
@@ -174,33 +193,44 @@ pub fn try_activate_ability_by_handle(
     handle: AbilitySpecHandle,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    let (ability, level, active_count) = {
+    let (ability, level) = {
         let Ok(asc) = params.asc_query.get(source) else {
             return false;
         };
         let Some(spec) = asc.find_ability_spec(handle) else {
             return false;
         };
-        (
-            spec.get_ability().clone(),
-            spec.get_level(),
-            spec.get_active_count(),
-        )
+        (spec.get_ability().clone(), spec.get_level())
     };
-
-    if !ability.allow_multiple_instances() && active_count > 0 {
-        return false;
-    }
-
-    if !can_activate_ability(source, target, &ability, level, params) {
-        return false;
-    }
 
     cancel_active_abilities_with_tags(
         source,
         ability.get_tags().get_cancel_abilities_with_tags(),
         params,
     );
+
+    let active_count = {
+        let Ok(asc) = params.asc_query.get(source) else {
+            return false;
+        };
+        let Some(spec) = asc.find_ability_spec(handle) else {
+            return false;
+        };
+        spec.get_active_count()
+    };
+
+    if !ability.allow_multiple_instances() && active_count > 0 {
+        return false;
+    }
+
+    if !passes_ability_activation_requirements(source, &ability, params) {
+        return false;
+    }
+
+    let Some(commit_plans) = prepare_ability_commit_plans(source, target, &ability, level, params)
+    else {
+        return false;
+    };
 
     let active_handle = {
         let Ok(mut asc) = params.asc_query.get_mut(source) else {
@@ -216,7 +246,7 @@ pub fn try_activate_ability_by_handle(
         )
     };
 
-    if !commit_ability(source, target, &ability, level, params) {
+    if !execute_ability_commit_plans(commit_plans, params) {
         if let Ok(mut asc) = params.asc_query.get_mut(source) {
             asc.rollback_started_ability(
                 active_handle,
@@ -308,6 +338,18 @@ pub fn can_activate_ability(
     level: u32,
     params: &mut AbilitySystemParams,
 ) -> bool {
+    if !passes_ability_activation_requirements(source, ability, params) {
+        return false;
+    }
+
+    can_pay_ability_cost(source, target, ability, level, params)
+}
+
+fn passes_ability_activation_requirements(
+    source: Entity,
+    ability: &Arc<GameplayAbility>,
+    params: &mut AbilitySystemParams,
+) -> bool {
     if let Ok(asc) = params.asc_query.get(source)
         && asc
             .blocked_ability_tags
@@ -333,7 +375,7 @@ pub fn can_activate_ability(
         }
     }
 
-    can_pay_ability_cost(source, target, ability, level, params)
+    true
 }
 
 pub fn commit_ability(
@@ -343,14 +385,37 @@ pub fn commit_ability(
     level: u32,
     params: &mut AbilitySystemParams,
 ) -> bool {
+    let Some(plans) = prepare_ability_commit_plans(source, _target, ability, level, params) else {
+        return false;
+    };
+
+    execute_ability_commit_plans(plans, params)
+}
+
+struct AbilityCommitPlans {
+    cost_plan: Option<GameplayEffectApplicationPlan>,
+    cooldown_plan: Option<GameplayEffectApplicationPlan>,
+}
+
+fn prepare_ability_commit_plans(
+    source: Entity,
+    _target: Entity,
+    ability: &Arc<GameplayAbility>,
+    level: u32,
+    params: &mut AbilitySystemParams,
+) -> Option<AbilityCommitPlans> {
     let cost_plan = if let Some(cost_def) = ability.get_cost() {
         if !cost_def.has_only_add_modifiers() {
-            return false;
+            return None;
         }
         let payload = EffectPayload::new(source, None, level);
-        let Some(plan) = prepare_gameplay_effect(source, cost_def, params, &payload) else {
-            return false;
-        };
+        let plan = prepare_gameplay_effect(source, cost_def, params, &payload)?;
+        if !plan.is_instant() {
+            return None;
+        }
+        if !can_pay_prepared_cost(source, &plan, params) {
+            return None;
+        }
         Some(plan)
     } else {
         None
@@ -358,24 +423,53 @@ pub fn commit_ability(
 
     let cooldown_plan = if let Some(cooldown_def) = ability.get_cooldown() {
         let payload = EffectPayload::new(source, None, level);
-        let Some(plan) = prepare_gameplay_effect(source, cooldown_def, params, &payload) else {
-            return false;
-        };
+        let plan = prepare_gameplay_effect(source, cooldown_def, params, &payload)?;
         Some(plan)
     } else {
         None
     };
 
-    if let Some(plan) = cost_plan
+    Some(AbilityCommitPlans {
+        cost_plan,
+        cooldown_plan,
+    })
+}
+
+fn execute_ability_commit_plans(
+    plans: AbilityCommitPlans,
+    params: &mut AbilitySystemParams,
+) -> bool {
+    if let Some(plan) = plans.cost_plan
         && !execute_gameplay_effect_plan(plan, params)
     {
         return false;
     }
 
-    if let Some(plan) = cooldown_plan
+    if let Some(plan) = plans.cooldown_plan
         && !execute_gameplay_effect_plan(plan, params)
     {
         return false;
+    }
+
+    true
+}
+
+fn can_pay_prepared_cost(
+    source: Entity,
+    cost_plan: &GameplayEffectApplicationPlan,
+    params: &mut AbilitySystemParams,
+) -> bool {
+    let Ok(mut attr_set) = params.attr_set_query.get_mut(source) else {
+        return false;
+    };
+
+    for cost in cost_plan.get_modifier_specs() {
+        let Some(current_val) = attr_set.get_current_value(cost.get_id()) else {
+            return false;
+        };
+        if current_val + cost.get_value() < 0.0 {
+            return false;
+        }
     }
 
     true
@@ -447,7 +541,18 @@ fn cancel_active_abilities_with_tags(
     };
 
     for active_handle in active_handles {
-        cancel_ability(source, active_handle, params);
+        let Ok((_, active_ability)) = params.active_ability_query.get_mut(active_handle) else {
+            continue;
+        };
+        let active_ability = active_ability.clone();
+        if let Ok(mut asc) = params.asc_query.get_mut(source) {
+            asc.finish_active_ability(
+                active_handle,
+                &active_ability,
+                &mut params.commands,
+                &params.tag_manager,
+            );
+        }
     }
 }
 
@@ -499,7 +604,17 @@ fn ability_has_any_tags(
     tags: &[GameplayTag],
     tag_manager: &Res<GameplayTagManager>,
 ) -> bool {
-    let mut ability_tags = GameplayTagContainer::default();
-    ability_tags.add_tags(ability.get_tags().get_ability_asset_tags(), tag_manager);
-    ability_tags.has_any(tags)
+    let Some(ability_bits) =
+        tag_bits_from_tags_with_manager(ability.get_tags().get_ability_asset_tags(), tag_manager)
+    else {
+        return false;
+    };
+    let Some(query_bits) = tag_bits_from_tags_with_manager(tags, tag_manager) else {
+        return false;
+    };
+
+    ability_bits
+        .iter()
+        .zip(query_bits.iter())
+        .any(|(a, b)| (a & b) != 0)
 }

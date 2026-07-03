@@ -3,7 +3,10 @@ use super::gameplay_effect_spec::{
 };
 use crate::ability_system::AbilitySystemComponent;
 use crate::attributes::{AttributeSet, AttributeSetSnapshot};
-use crate::gameplay_tags::{GameplayTag, GameplayTagContainer, GameplayTagManager};
+use crate::gameplay_tags::{
+    GameplayTag, GameplayTagBits, GameplayTagContainer, GameplayTagManager, tag_bits_from_tags,
+    tag_bits_from_tags_with_manager,
+};
 use crate::modifiers::{Modifier, ModifierMagnitude, ModifierOperation};
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::Query;
@@ -246,13 +249,19 @@ impl StackingPolicy {
 pub struct TagRequirements {
     require_all: Vec<GameplayTag>,
     ignore_any: Vec<GameplayTag>,
+    require_all_bits: Option<GameplayTagBits>,
+    ignore_any_bits: Option<GameplayTagBits>,
 }
 
 impl TagRequirements {
     pub fn new(require_all: Vec<GameplayTag>, ignore_any: Vec<GameplayTag>) -> Self {
+        let require_all_bits = tag_bits_from_tags(&require_all);
+        let ignore_any_bits = tag_bits_from_tags(&ignore_any);
         Self {
             require_all,
             ignore_any,
+            require_all_bits,
+            ignore_any_bits,
         }
     }
 
@@ -269,7 +278,16 @@ impl TagRequirements {
             return false;
         };
 
-        tags.has_all(&self.require_all) && !tags.has_any(&self.ignore_any)
+        let has_required = self
+            .require_all_bits
+            .as_ref()
+            .is_some_and(|bits| tags.has_all_bits(bits));
+        let has_blocked = self
+            .ignore_any_bits
+            .as_ref()
+            .is_some_and(|bits| tags.has_any_bits(bits));
+
+        has_required && !has_blocked
     }
 
     pub fn passes_tag_slice(
@@ -281,9 +299,32 @@ impl TagRequirements {
             return true;
         }
 
-        let mut container = GameplayTagContainer::default();
-        container.add_tags(tags, tag_manager);
-        self.passes(Some(&container))
+        let Some(tag_bits) = tag_bits_from_tags_with_manager(tags, tag_manager) else {
+            return false;
+        };
+
+        self.passes_tag_bits(&tag_bits)
+    }
+
+    pub fn passes_tag_bits(&self, tag_bits: &GameplayTagBits) -> bool {
+        if self.is_empty() {
+            return true;
+        }
+
+        let has_required = self.require_all_bits.as_ref().is_some_and(|required| {
+            tag_bits
+                .iter()
+                .zip(required.iter())
+                .all(|(a, b)| (a & b) == *b)
+        });
+        let has_blocked = self.ignore_any_bits.as_ref().is_some_and(|ignored| {
+            tag_bits
+                .iter()
+                .zip(ignored.iter())
+                .any(|(a, b)| (a & b) != 0)
+        });
+
+        has_required && !has_blocked
     }
 
     pub fn get_required_tags(&self) -> &[GameplayTag] {
@@ -319,6 +360,15 @@ impl GameplayEffectImmunityQuery {
             && self
                 .effect_tags
                 .passes_tag_slice(effect_asset_tags, tag_manager)
+    }
+
+    pub fn matches_tag_bits(
+        &self,
+        source_tags: Option<&GameplayTagContainer>,
+        effect_asset_bits: Option<&GameplayTagBits>,
+    ) -> bool {
+        self.source_tags.passes(source_tags)
+            && effect_asset_bits.is_some_and(|bits| self.effect_tags.passes_tag_bits(bits))
     }
 }
 

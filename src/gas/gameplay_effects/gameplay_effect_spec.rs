@@ -1,4 +1,5 @@
 use super::{EffectTags, GameplayEffect, StackingPolicy};
+use crate::attributes::AttributeId;
 use crate::modifiers::ModifierSpec;
 use std::sync::Arc;
 
@@ -86,6 +87,10 @@ impl GameplayEffectSpec {
 
     pub fn get_modifier_specs(&self) -> &[ModifierSpec] {
         &self.modifier_specs
+    }
+
+    pub fn get_modified_attribute_ids(&self) -> impl Iterator<Item = AttributeId> + '_ {
+        self.modifier_specs.iter().map(ModifierSpec::get_id)
     }
 
     pub fn get_period_spec(&self) -> &Option<EffectPeriodTicksSpec> {

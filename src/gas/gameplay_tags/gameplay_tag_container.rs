@@ -15,6 +15,20 @@ pub fn tag_bits_from_tags(tags: &[GameplayTag]) -> Option<GameplayTagBits> {
     Some(result)
 }
 
+pub fn tag_bits_from_tags_with_manager(
+    tags: &[GameplayTag],
+    manager: &Res<GameplayTagManager>,
+) -> Option<GameplayTagBits> {
+    let mut result = GameplayTagBits::default();
+    for tag in tags {
+        let inherited_bits = manager.get_inherited_bits(tag)?;
+        for (dst, src) in result.iter_mut().zip(inherited_bits.iter()) {
+            *dst |= *src;
+        }
+    }
+    Some(result)
+}
+
 pub fn add_bit_with_tag(bits: &mut GameplayTagBits, tag: &GameplayTag) -> Option<()> {
     let tag_bit_index = tag.get_bit_index_usize();
     if tag_bit_index >= MAX_TAG_COUNTS {
@@ -124,15 +138,24 @@ impl GameplayTagContainer {
         let Some(tag_bits) = tag_bits_from_tags(tags) else {
             return false;
         };
+        self.has_all_bits(&tag_bits)
+    }
+
+    pub fn has_all_bits(&self, tag_bits: &GameplayTagBits) -> bool {
         self.tag_bits
             .iter()
             .zip(tag_bits.iter())
             .all(|(a, b)| (a & b) == *b)
     }
+
     pub fn has_any(&self, tags: &[GameplayTag]) -> bool {
         let Some(tag_bits) = tag_bits_from_tags(tags) else {
             return false;
         };
+        self.has_any_bits(&tag_bits)
+    }
+
+    pub fn has_any_bits(&self, tag_bits: &GameplayTagBits) -> bool {
         self.tag_bits
             .iter()
             .zip(tag_bits.iter())

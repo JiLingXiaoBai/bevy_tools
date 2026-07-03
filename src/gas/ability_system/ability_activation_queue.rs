@@ -101,3 +101,7 @@ pub fn process_ability_activation_queue_system(
         );
     }
 }
+
+pub fn ability_activation_queue_has_work(queue: Option<Res<AbilityActivationQueue>>) -> bool {
+    queue.is_some_and(|queue| !queue.is_empty())
+}

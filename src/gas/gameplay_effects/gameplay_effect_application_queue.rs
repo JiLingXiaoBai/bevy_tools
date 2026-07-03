@@ -109,3 +109,9 @@ pub fn process_gameplay_effect_application_queue_system(
         );
     }
 }
+
+pub fn gameplay_effect_application_queue_has_work(
+    queue: Option<Res<GameplayEffectApplicationQueue>>,
+) -> bool {
+    queue.is_some_and(|queue| !queue.is_empty())
+}
