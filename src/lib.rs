@@ -37,16 +37,20 @@ pub struct GameplayAbilitySystemRuntimePlugin;
 
 impl Plugin for GameplayAbilitySystemRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AttributeIdManager>().add_systems(
-            FixedUpdate,
-            (
-                update_active_effect_tag_requirements_system,
-                (tick_effect_duration_system, tick_effect_period_system),
-                cleanup_finished_abilities_system,
-                recalculate_attribute_sets_system,
-            )
-                .chain(),
-        );
+        app.init_resource::<AttributeIdManager>()
+            .init_resource::<AbilityActivationQueue>()
+            .add_systems(
+                FixedUpdate,
+                (
+                    update_active_effect_tag_requirements_system,
+                    (tick_effect_duration_system, tick_effect_period_system),
+                    tick_ability_tasks_system,
+                    process_ability_activation_queue_system,
+                    cleanup_finished_abilities_system,
+                    recalculate_attribute_sets_system,
+                )
+                    .chain(),
+            );
     }
 }
 
