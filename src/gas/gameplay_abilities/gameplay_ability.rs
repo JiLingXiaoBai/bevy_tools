@@ -1,3 +1,4 @@
+use crate::gameplay_abilities::AbilityTaskDef;
 use crate::gameplay_effects::GameplayEffect;
 use crate::gameplay_tags::GameplayTag;
 use std::sync::Arc;
@@ -51,6 +52,7 @@ impl AbilityTags {
 
 pub struct GameplayAbility {
     ability_tags: AbilityTags,
+    startup_tasks: Vec<AbilityTaskDef>,
     cooldown: Option<Arc<GameplayEffect>>,
     cost: Option<Arc<GameplayEffect>>,
     activation_effects: Vec<Arc<GameplayEffect>>,
@@ -61,6 +63,7 @@ pub struct GameplayAbility {
 impl GameplayAbility {
     pub fn new(
         ability_tags: AbilityTags,
+        startup_tasks: Vec<AbilityTaskDef>,
         cooldown: Option<Arc<GameplayEffect>>,
         cost: Option<Arc<GameplayEffect>>,
         activation_effects: Vec<Arc<GameplayEffect>>,
@@ -69,6 +72,7 @@ impl GameplayAbility {
     ) -> Self {
         Self {
             ability_tags,
+            startup_tasks,
             cooldown,
             cost,
             activation_effects,
@@ -79,6 +83,10 @@ impl GameplayAbility {
 
     pub fn get_tags(&self) -> &AbilityTags {
         &self.ability_tags
+    }
+
+    pub fn get_startup_tasks(&self) -> &[AbilityTaskDef] {
+        &self.startup_tasks
     }
 
     pub fn get_cooldown(&self) -> Option<&Arc<GameplayEffect>> {

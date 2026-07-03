@@ -1,7 +1,7 @@
 use crate::attributes::{AttributeSet, AttributeSetSnapshot};
 use crate::gameplay_abilities::{
-    AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle, ActiveGameplayAbility,
-    GameplayAbility, GameplayAbilitySpec,
+    AbilityActivationStatus, AbilitySpecHandle, AbilityTaskDef, ActiveAbilityHandle,
+    ActiveGameplayAbility, GameplayAbility, GameplayAbilitySpec,
 };
 use crate::gameplay_effects::{
     ActiveEffectDurationTicks, ActiveEffectPeriodTicks, ActiveGameplayEffect, EffectContext,
@@ -163,7 +163,7 @@ impl AbilitySystemComponent {
 
         self.blocked_ability_tags
             .remove_tags(&blocked_tags, tag_manager);
-        commands.entity(active_handle).despawn();
+        commands.entity(active_handle).despawn_children().despawn();
         true
     }
 }
@@ -234,6 +234,16 @@ pub fn try_activate_ability_by_handle(
         let _ = apply_gameplay_effect(target, effect, params, &payload);
     }
 
+    spawn_startup_ability_tasks(
+        active_handle,
+        source,
+        target,
+        handle,
+        level,
+        ability.get_startup_tasks(),
+        &mut params.commands,
+    );
+
     if ability.should_end_on_activation() {
         params
             .commands
@@ -247,6 +257,22 @@ pub fn try_activate_ability_by_handle(
     }
 
     true
+}
+
+fn spawn_startup_ability_tasks(
+    active_handle: ActiveAbilityHandle,
+    source: Entity,
+    target: Entity,
+    spec_handle: AbilitySpecHandle,
+    level: u32,
+    startup_tasks: &[AbilityTaskDef],
+    commands: &mut Commands,
+) {
+    for task_def in startup_tasks {
+        let mut task_cmds =
+            commands.spawn(task_def.instantiate(active_handle, source, target, spec_handle, level));
+        task_cmds.set_parent_in_place(active_handle);
+    }
 }
 
 pub fn end_ability(
@@ -388,7 +414,7 @@ pub fn cleanup_finished_abilities_system(
         if let Ok(mut asc) = asc_query.get_mut(active_ability.get_source()) {
             asc.finish_active_ability(active_handle, active_ability, &mut commands, &tag_manager);
         } else {
-            commands.entity(active_handle).despawn();
+            commands.entity(active_handle).despawn_children().despawn();
         }
     }
 }

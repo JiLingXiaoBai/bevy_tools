@@ -1,4 +1,4 @@
-use super::{EffectTags, GameplayEffect, StackingType};
+use super::{EffectTags, GameplayEffect, StackingPolicy};
 use crate::modifiers::ModifierSpec;
 use std::sync::Arc;
 
@@ -52,8 +52,7 @@ pub struct GameplayEffectSpec {
     modifier_specs: Vec<ModifierSpec>,
     duration_spec: EffectDurationTicksSpec,
     period_spec: Option<EffectPeriodTicksSpec>,
-    stacking_type: StackingType,
-    stacking_limit: u32,
+    stacking_policy: StackingPolicy,
 }
 
 impl GameplayEffectSpec {
@@ -62,16 +61,14 @@ impl GameplayEffectSpec {
         modifier_specs: Vec<ModifierSpec>,
         duration_spec: EffectDurationTicksSpec,
         period_spec: Option<EffectPeriodTicksSpec>,
-        stacking_type: StackingType,
-        stacking_limit: u32,
+        stacking_policy: StackingPolicy,
     ) -> Self {
         Self {
             def,
             modifier_specs,
             duration_spec,
             period_spec,
-            stacking_type,
-            stacking_limit,
+            stacking_policy,
         }
     }
 
@@ -95,11 +92,7 @@ impl GameplayEffectSpec {
         &self.period_spec
     }
 
-    pub fn get_stacking_type(&self) -> StackingType {
-        self.stacking_type
-    }
-
-    pub fn get_stacking_limit(&self) -> u32 {
-        self.stacking_limit
+    pub fn get_stacking_policy(&self) -> StackingPolicy {
+        self.stacking_policy
     }
 }

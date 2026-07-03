@@ -1,13 +1,157 @@
 use crate::ability_system::AbilityActivationQueue;
-use crate::gameplay_abilities::{AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle};
+use crate::gameplay_abilities::{
+    AbilityActivationStatus, AbilitySpecHandle, ActiveAbilityHandle, ActiveGameplayAbility,
+};
 use crate::gameplay_effects::{EffectPayload, GameplayEffect, GameplayEffectApplicationQueue};
+use crate::unique_names::UniqueName;
 use bevy::prelude::*;
 use std::sync::Arc;
+
+#[derive(Event, Clone)]
+pub struct AbilityTaskEvent {
+    source: Entity,
+    target: Entity,
+    active_ability: ActiveAbilityHandle,
+    spec_handle: AbilitySpecHandle,
+    event_id: UniqueName,
+    level: u32,
+}
+
+impl AbilityTaskEvent {
+    pub fn new(
+        source: Entity,
+        target: Entity,
+        active_ability: ActiveAbilityHandle,
+        spec_handle: AbilitySpecHandle,
+        event_id: UniqueName,
+        level: u32,
+    ) -> Self {
+        Self {
+            source,
+            target,
+            active_ability,
+            spec_handle,
+            event_id,
+            level,
+        }
+    }
+
+    pub fn get_source(&self) -> Entity {
+        self.source
+    }
+
+    pub fn get_target(&self) -> Entity {
+        self.target
+    }
+
+    pub fn get_active_ability(&self) -> ActiveAbilityHandle {
+        self.active_ability
+    }
+
+    pub fn get_spec_handle(&self) -> AbilitySpecHandle {
+        self.spec_handle
+    }
+
+    pub fn get_event_id(&self) -> UniqueName {
+        self.event_id
+    }
+
+    pub fn get_level(&self) -> u32 {
+        self.level
+    }
+}
+
+#[derive(Clone)]
+pub enum AbilityTaskOnFinishedDef {
+    None,
+    EndAbility,
+    EmitEvent { event_id: UniqueName },
+    ApplyGameplayEffectToTarget { effect: Arc<GameplayEffect> },
+}
+
+#[derive(Clone)]
+pub enum AbilityTaskDef {
+    Instant {
+        on_finished: AbilityTaskOnFinishedDef,
+    },
+    WaitTicks {
+        ticks: u32,
+        on_finished: AbilityTaskOnFinishedDef,
+    },
+}
+
+impl AbilityTaskDef {
+    pub fn instant(on_finished: AbilityTaskOnFinishedDef) -> Self {
+        Self::Instant { on_finished }
+    }
+
+    pub fn wait_ticks(ticks: u32, on_finished: AbilityTaskOnFinishedDef) -> Self {
+        Self::WaitTicks { ticks, on_finished }
+    }
+
+    pub fn instantiate(
+        &self,
+        active_ability: ActiveAbilityHandle,
+        source: Entity,
+        target: Entity,
+        spec_handle: AbilitySpecHandle,
+        level: u32,
+    ) -> AbilityTask {
+        match self {
+            AbilityTaskDef::Instant { on_finished } => AbilityTask::instant(
+                active_ability,
+                on_finished.instantiate(source, target, spec_handle, level),
+            ),
+            AbilityTaskDef::WaitTicks { ticks, on_finished } => AbilityTask::wait_ticks(
+                active_ability,
+                *ticks,
+                on_finished.instantiate(source, target, spec_handle, level),
+            ),
+        }
+    }
+}
+
+impl AbilityTaskOnFinishedDef {
+    fn instantiate(
+        &self,
+        source: Entity,
+        target: Entity,
+        spec_handle: AbilitySpecHandle,
+        level: u32,
+    ) -> AbilityTaskOnFinished {
+        match self {
+            AbilityTaskOnFinishedDef::None => AbilityTaskOnFinished::None,
+            AbilityTaskOnFinishedDef::EndAbility => AbilityTaskOnFinished::EndAbility,
+            AbilityTaskOnFinishedDef::EmitEvent { event_id } => AbilityTaskOnFinished::EmitEvent {
+                source,
+                target,
+                spec_handle,
+                event_id: *event_id,
+                level,
+            },
+            AbilityTaskOnFinishedDef::ApplyGameplayEffectToTarget { effect } => {
+                AbilityTaskOnFinished::ApplyGameplayEffect {
+                    source,
+                    target,
+                    effect: effect.clone(),
+                    level,
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub enum AbilityTaskOnFinished {
     None,
     EndAbility,
+    EmitEvent {
+        source: Entity,
+        target: Entity,
+        spec_handle: AbilitySpecHandle,
+        event_id: UniqueName,
+        level: u32,
+    },
     ActivateAbility {
         source: Entity,
         target: Entity,
@@ -23,6 +167,7 @@ pub enum AbilityTaskOnFinished {
 
 #[derive(Debug, Clone, Copy)]
 pub enum AbilityTaskKind {
+    Instant,
     WaitTicks { remaining_ticks: u32 },
 }
 
@@ -34,6 +179,17 @@ pub struct AbilityTask {
 }
 
 impl AbilityTask {
+    pub fn instant(
+        active_ability: ActiveAbilityHandle,
+        on_finished: AbilityTaskOnFinished,
+    ) -> Self {
+        Self {
+            active_ability,
+            kind: AbilityTaskKind::Instant,
+            on_finished,
+        }
+    }
+
     pub fn wait_ticks(
         active_ability: ActiveAbilityHandle,
         ticks: u32,
@@ -62,6 +218,7 @@ impl AbilityTask {
 
     fn tick(&mut self) -> bool {
         match &mut self.kind {
+            AbilityTaskKind::Instant => true,
             AbilityTaskKind::WaitTicks { remaining_ticks } => {
                 if *remaining_ticks > 0 {
                     *remaining_ticks -= 1;
@@ -75,11 +232,21 @@ impl AbilityTask {
 pub fn tick_ability_tasks_system(
     mut commands: Commands,
     mut task_query: Query<(Entity, &mut AbilityTask)>,
-    mut active_ability_query: Query<&mut crate::gameplay_abilities::ActiveGameplayAbility>,
+    mut active_ability_query: Query<&mut ActiveGameplayAbility>,
     mut activation_queue: ResMut<AbilityActivationQueue>,
     mut effect_queue: ResMut<GameplayEffectApplicationQueue>,
 ) {
     for (task_entity, mut task) in task_query.iter_mut() {
+        let Ok(active_ability) = active_ability_query.get(task.get_active_ability()) else {
+            commands.entity(task_entity).despawn();
+            continue;
+        };
+
+        if !matches!(active_ability.get_status(), AbilityActivationStatus::Active) {
+            commands.entity(task_entity).despawn();
+            continue;
+        }
+
         if !task.tick() {
             continue;
         }
@@ -92,6 +259,22 @@ pub fn tick_ability_tasks_system(
                 {
                     active_ability.set_status(AbilityActivationStatus::Ending);
                 }
+            }
+            AbilityTaskOnFinished::EmitEvent {
+                source,
+                target,
+                spec_handle,
+                event_id,
+                level,
+            } => {
+                commands.trigger(AbilityTaskEvent::new(
+                    source,
+                    target,
+                    task.get_active_ability(),
+                    spec_handle,
+                    event_id,
+                    level,
+                ));
             }
             AbilityTaskOnFinished::ActivateAbility {
                 source,

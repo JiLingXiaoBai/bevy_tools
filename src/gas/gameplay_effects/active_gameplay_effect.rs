@@ -1,4 +1,7 @@
-use super::gameplay_effect::{EffectPayload, GameplayEffect, StackingType};
+use super::gameplay_effect::{
+    EffectPayload, GameplayEffect, StackDurationPolicy, StackExpirationPolicy,
+    StackMagnitudePolicy, StackOverflowPolicy, StackPeriodPolicy, StackingType,
+};
 use super::gameplay_effect_spec::{EffectDurationTicksSpec, GameplayEffectSpec};
 use crate::ability_system::AbilitySystemParams;
 use crate::attributes::AttributeSet;
@@ -148,9 +151,24 @@ pub fn prepare_gameplay_effect(
         &mut params.active_effect_query,
         &removed_effects,
     ) {
-        let limit = spec.get_stacking_limit();
+        let stacking_policy = spec.get_stacking_policy();
+        let limit = stacking_policy.get_stack_limit();
         if limit != 0 && stack_count >= limit {
-            return None;
+            match stacking_policy.get_overflow_policy() {
+                StackOverflowPolicy::RejectApplication => return None,
+                StackOverflowPolicy::RefreshDuration => {
+                    return Some(GameplayEffectApplicationPlan {
+                        source,
+                        target,
+                        spec,
+                        removed_effects,
+                        kind: GameplayEffectApplicationKind::StackExisting {
+                            handle,
+                            new_stack_count: stack_count,
+                        },
+                    });
+                }
+            }
         }
 
         return Some(GameplayEffectApplicationPlan {
@@ -242,13 +260,20 @@ fn execute_stack_existing_effect(
     let existing_target = active_effect.get_target();
     let existing_spec = active_effect.get_spec().clone();
 
-    if let (EffectDurationTicksSpec::DurationTicks(duration_ticks), Some(mut duration)) =
+    if matches!(
+        plan.spec.get_stacking_policy().get_duration_policy(),
+        StackDurationPolicy::RefreshOnSuccessfulStack
+    ) && let (EffectDurationTicksSpec::DurationTicks(duration_ticks), Some(mut duration)) =
         (plan.spec.get_duration_spec(), duration)
     {
         duration.remain_ticks = *duration_ticks;
     }
 
-    if let Some(mut period) = period {
+    if matches!(
+        plan.spec.get_stacking_policy().get_period_policy(),
+        StackPeriodPolicy::ResetOnSuccessfulStack
+    ) && let Some(mut period) = period
+    {
         period.current_tick = 0;
     }
 
@@ -416,27 +441,70 @@ pub fn cleanup_active_gameplay_effect(
     commands.entity(handle).despawn();
 }
 
+fn expire_active_gameplay_effect(
+    commands: &mut Commands,
+    handle: ActiveEffectHandle,
+    duration: &mut ActiveEffectDurationTicks,
+    effect: &mut ActiveGameplayEffect,
+    attr_query: &mut Query<&mut AttributeSet>,
+    tag_query: &mut Query<&mut GameplayTagContainer>,
+    tag_manager: &Res<GameplayTagManager>,
+) {
+    if matches!(
+        effect
+            .get_spec()
+            .get_stacking_policy()
+            .get_expiration_policy(),
+        StackExpirationPolicy::RemoveSingleStack
+    ) && effect.get_stack_count() > 1
+    {
+        effect.set_stack_count(effect.get_stack_count() - 1);
+        if let EffectDurationTicksSpec::DurationTicks(duration_ticks) =
+            effect.get_spec().get_duration_spec()
+        {
+            duration.remain_ticks = *duration_ticks;
+        }
+
+        if !effect.is_inhibited()
+            && effect.get_spec().get_period_spec().is_none()
+            && let Ok(mut attr_set) = attr_query.get_mut(effect.get_target())
+        {
+            attr_set.remove_modifiers(handle);
+            apply_duration_modifiers(
+                &mut attr_set,
+                effect.get_spec(),
+                handle,
+                effect.get_stack_count(),
+            );
+        }
+        return;
+    }
+
+    cleanup_active_gameplay_effect(commands, handle, effect, attr_query, tag_query, tag_manager);
+}
+
 pub fn tick_effect_duration_system(
     mut commands: Commands,
     mut query: Query<(
         Entity,
         &mut ActiveEffectDurationTicks,
-        &ActiveGameplayEffect,
+        &mut ActiveGameplayEffect,
     )>,
     mut attr_query: Query<&mut AttributeSet>,
     mut tag_query: Query<&mut GameplayTagContainer>,
     tag_manager: Res<GameplayTagManager>,
 ) {
-    for (entity, mut duration, effect) in query.iter_mut() {
+    for (entity, mut duration, mut effect) in query.iter_mut() {
         if duration.remain_ticks > 0 {
             duration.remain_ticks -= 1;
         }
 
         if duration.remain_ticks == 0 {
-            cleanup_active_gameplay_effect(
+            expire_active_gameplay_effect(
                 &mut commands,
                 entity,
-                effect,
+                &mut duration,
+                &mut effect,
                 &mut attr_query,
                 &mut tag_query,
                 &tag_manager,
@@ -521,7 +589,7 @@ fn find_stackable_active_effect(
     )>,
     ignored_handles: &[ActiveEffectHandle],
 ) -> Option<(ActiveEffectHandle, u32)> {
-    let stacking_type = spec.get_stacking_type();
+    let stacking_type = spec.get_stacking_policy().get_stacking_type();
     if matches!(stacking_type, StackingType::None) {
         return None;
     }
@@ -768,8 +836,12 @@ fn apply_duration_modifiers(
     handle: ActiveEffectHandle,
     stack_count: u32,
 ) {
+    let stack_multiplier = stack_multiplier(
+        spec.get_stacking_policy().get_magnitude_policy(),
+        stack_count,
+    );
     for mod_spec in spec.get_modifier_specs() {
-        let stacked_spec = mod_spec.scaled_by_stack(stack_count);
+        let stacked_spec = mod_spec.scaled_by_stack(stack_multiplier);
         attr_set.apply_duration_modifier(&stacked_spec, handle);
     }
 }
@@ -779,9 +851,20 @@ fn apply_instant_modifiers(
     spec: &GameplayEffectSpec,
     stack_count: u32,
 ) {
+    let stack_multiplier = stack_multiplier(
+        spec.get_stacking_policy().get_magnitude_policy(),
+        stack_count,
+    );
     for mod_spec in spec.get_modifier_specs() {
-        let stacked_spec = mod_spec.scaled_by_stack(stack_count);
+        let stacked_spec = mod_spec.scaled_by_stack(stack_multiplier);
         attr_set.apply_instant_modifier(&stacked_spec);
+    }
+}
+
+fn stack_multiplier(policy: StackMagnitudePolicy, stack_count: u32) -> u32 {
+    match policy {
+        StackMagnitudePolicy::None => 1,
+        StackMagnitudePolicy::Linear => stack_count,
     }
 }
 
