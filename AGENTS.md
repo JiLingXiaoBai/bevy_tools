@@ -432,7 +432,7 @@ tests/
 
 - **Rust edition 2024** — 使用新语言特性（如 `if let` 链、`use` 重导出、
   `impl Trait` 在关联类型位置等）
-- **`pub use` 重导出模式** — 每个模块有一个 `mod.rs` 声明子模块并通过
+- **`pub use` 重导出模式** — 每个模块使用模块文件+同名目录布局，并通过
   `pub use submodule::*` 重导出其公开项
 - **Component/Resource 为中心** — 游戏状态存储在 Bevy Component 和 Resource
   中，而非独立的 world 存储
