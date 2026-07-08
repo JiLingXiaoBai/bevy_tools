@@ -6,7 +6,7 @@
 
 - Rust edition 2024
 - Bevy `0.19.0`
-- rand `0.10.1`
+- rand `0.10.2`
 
 ## 核心目标
 

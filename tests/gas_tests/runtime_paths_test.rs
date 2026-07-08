@@ -1,0 +1,263 @@
+use super::common::{
+    active_effect_handles, add_tag_to_entity, apply_effect_with_payload, attribute_set,
+    current_value, empty_effect_tags, register_attribute, register_tag,
+    run_active_effect_index_reconcile, run_fixed_update, test_app,
+};
+use bevy::prelude::*;
+use bevy_tools::{
+    AbilityActivationQueue, AbilitySystemComponent, AbilityTaskDef, AbilityTaskOnFinishedDef,
+    AttributeClamp, AttributeId, AttributeSet, EffectContext, EffectDurationTicks, EffectPayload,
+    GameplayAbility, GameplayEffect, GameplayEffectApplicationQueue, GameplayTag,
+    GameplayTagContainer, Modifier, ModifierMagnitude, ModifierMagnitudeCalculation,
+    ModifierOperation, StackingPolicy,
+};
+use std::sync::Arc;
+
+struct LevelMagnitude {
+    scale: f64,
+}
+
+impl ModifierMagnitudeCalculation for LevelMagnitude {
+    fn calculate(&self, context: &EffectContext) -> f64 {
+        context.level() as f64 * self.scale
+    }
+}
+
+struct SnapshotCurrentMagnitude {
+    attribute: AttributeId,
+}
+
+impl ModifierMagnitudeCalculation for SnapshotCurrentMagnitude {
+    fn calculate(&self, context: &EffectContext) -> f64 {
+        context
+            .source_snapshot()
+            .and_then(|snapshot| snapshot.get_current_value(self.attribute))
+            .unwrap_or(0.0)
+    }
+}
+
+struct SourceTagMagnitude {
+    tag: GameplayTag,
+    tagged: f64,
+    untagged: f64,
+}
+
+impl ModifierMagnitudeCalculation for SourceTagMagnitude {
+    fn calculate(&self, context: &EffectContext) -> f64 {
+        let has_tag = context
+            .tag_container_query
+            .get(context.source())
+            .ok()
+            .is_some_and(|tags| tags.has_tag(&self.tag));
+        if has_tag { self.tagged } else { self.untagged }
+    }
+}
+
+#[test]
+fn fixed_update_processes_queued_effect_before_next_duration_tick() {
+    let mut app = test_app();
+    let health = register_attribute(&mut app, "Health");
+    let target = app
+        .world_mut()
+        .spawn(attribute_set(health, 10.0, AttributeClamp::None))
+        .id();
+    let effect = Arc::new(GameplayEffect::new(
+        vec![super::common::add_modifier(health, 5.0)],
+        EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(1.0)),
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        empty_effect_tags(),
+    ));
+
+    app.world_mut()
+        .resource_mut::<GameplayEffectApplicationQueue>()
+        .push_application(target, effect, EffectPayload::new(target, None, 1));
+
+    run_fixed_update(&mut app);
+    assert_eq!(current_value(&mut app, target, health), 15.0);
+    assert_eq!(active_effect_handles(&app, target).len(), 1);
+
+    run_fixed_update(&mut app);
+    assert_eq!(current_value(&mut app, target, health), 10.0);
+    assert!(active_effect_handles(&app, target).is_empty());
+}
+
+#[test]
+fn fixed_update_activation_tasks_and_cleanup_run_in_plugin_order() {
+    let mut app = test_app();
+    let source = app
+        .world_mut()
+        .spawn(AbilitySystemComponent::default())
+        .id();
+    let ability = Arc::new(GameplayAbility::new(
+        bevy_tools::AbilityTags::default(),
+        vec![AbilityTaskDef::wait_ticks(
+            1,
+            AbilityTaskOnFinishedDef::EndAbility,
+        )],
+        None,
+        None,
+        Vec::new(),
+        false,
+        false,
+    ));
+    let handle = super::common::give_ability(&mut app, source, ability);
+
+    app.world_mut()
+        .resource_mut::<AbilityActivationQueue>()
+        .push_activation(source, source, handle);
+
+    run_fixed_update(&mut app);
+    assert_eq!(super::common::active_ability_count(&mut app), 1);
+    assert_eq!(super::common::ability_task_count(&mut app), 1);
+
+    run_fixed_update(&mut app);
+    assert_eq!(super::common::active_ability_count(&mut app), 0);
+    assert_eq!(super::common::ability_task_count(&mut app), 0);
+    assert_eq!(
+        app.world()
+            .entity(source)
+            .get::<AbilitySystemComponent>()
+            .unwrap()
+            .find_ability_spec(handle)
+            .unwrap()
+            .get_active_count(),
+        0
+    );
+}
+
+#[test]
+fn calculated_magnitude_can_use_effect_level() {
+    let mut app = test_app();
+    let damage = register_attribute(&mut app, "Damage");
+    let target = app
+        .world_mut()
+        .spawn(attribute_set(damage, 0.0, AttributeClamp::None))
+        .id();
+    let effect = Arc::new(GameplayEffect::new(
+        vec![Modifier::new(
+            damage,
+            ModifierOperation::Add,
+            ModifierMagnitude::Calculated(Box::new(LevelMagnitude { scale: 3.0 })),
+        )],
+        EffectDurationTicks::Instant,
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        empty_effect_tags(),
+    ));
+
+    assert!(apply_effect_with_payload(
+        &mut app,
+        target,
+        effect,
+        EffectPayload::new(target, None, 4),
+    ));
+    assert_eq!(current_value(&mut app, target, damage), 12.0);
+}
+
+#[test]
+fn calculated_magnitude_can_use_source_snapshot() {
+    let mut app = test_app();
+    let power = register_attribute(&mut app, "Power");
+    let damage = register_attribute(&mut app, "Damage");
+    let source = app
+        .world_mut()
+        .spawn(attribute_set(power, 7.0, AttributeClamp::None))
+        .id();
+    let target = app
+        .world_mut()
+        .spawn(attribute_set(damage, 0.0, AttributeClamp::None))
+        .id();
+    let snapshot = app
+        .world_mut()
+        .entity_mut(source)
+        .get_mut::<AttributeSet>()
+        .unwrap()
+        .make_snapshot(source);
+    let effect = Arc::new(GameplayEffect::new(
+        vec![Modifier::new(
+            damage,
+            ModifierOperation::Add,
+            ModifierMagnitude::Calculated(Box::new(SnapshotCurrentMagnitude { attribute: power })),
+        )],
+        EffectDurationTicks::Instant,
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        empty_effect_tags(),
+    ));
+
+    assert!(apply_effect_with_payload(
+        &mut app,
+        target,
+        effect,
+        EffectPayload::new(source, None, 1).with_source_snapshot(snapshot),
+    ));
+    assert_eq!(current_value(&mut app, target, damage), 7.0);
+}
+
+#[test]
+fn calculated_magnitude_can_read_source_tags() {
+    let mut app = test_app();
+    let damage = register_attribute(&mut app, "Damage");
+    let empowered = register_tag(&mut app, "State.Empowered");
+    let source = app.world_mut().spawn(GameplayTagContainer::default()).id();
+    let target = app
+        .world_mut()
+        .spawn(attribute_set(damage, 0.0, AttributeClamp::None))
+        .id();
+    add_tag_to_entity(&mut app, source, empowered);
+    let effect = Arc::new(GameplayEffect::new(
+        vec![Modifier::new(
+            damage,
+            ModifierOperation::Add,
+            ModifierMagnitude::Calculated(Box::new(SourceTagMagnitude {
+                tag: empowered,
+                tagged: 20.0,
+                untagged: 5.0,
+            })),
+        )],
+        EffectDurationTicks::Instant,
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        empty_effect_tags(),
+    ));
+
+    assert!(apply_effect_with_payload(
+        &mut app,
+        target,
+        effect,
+        EffectPayload::new(source, None, 1),
+    ));
+    assert_eq!(current_value(&mut app, target, damage), 20.0);
+}
+
+#[test]
+fn reconcile_removes_externally_despawned_active_effect_from_target_index() {
+    let mut app = test_app();
+    let power = register_attribute(&mut app, "Power");
+    let target = app
+        .world_mut()
+        .spawn(attribute_set(power, 10.0, AttributeClamp::None))
+        .id();
+    let effect = Arc::new(GameplayEffect::new(
+        vec![super::common::add_modifier(power, 5.0)],
+        EffectDurationTicks::Infinite,
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        empty_effect_tags(),
+    ));
+
+    assert!(super::common::apply_effect(
+        &mut app, target, target, effect
+    ));
+    let handle = active_effect_handles(&app, target)[0];
+    app.world_mut().entity_mut(handle).despawn();
+
+    run_active_effect_index_reconcile(&mut app);
+    assert!(active_effect_handles(&app, target).is_empty());
+}

@@ -91,6 +91,7 @@ impl GameplayTagManager {
             self.tag_inherited_bits.push(inherited_bits);
             self.tag_children.push(Vec::new());
         }
+        self.tag_name_to_index.insert(unique_name, new_index);
         if let Some(p_index) = parent_tag_index
             && (p_index as usize) < self.tag_children.len()
         {

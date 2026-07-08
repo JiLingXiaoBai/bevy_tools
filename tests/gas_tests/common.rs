@@ -1,0 +1,277 @@
+use bevy::ecs::system::RunSystemOnce;
+use bevy::prelude::*;
+use bevy_tools::attributes::{AttributeClamp, AttributeId, AttributeIdRegister, AttributeSet};
+use bevy_tools::gameplay_abilities::{AbilitySpecHandle, AbilityTask, ActiveGameplayAbility};
+use bevy_tools::gameplay_effects::{
+    EffectDurationTicks, EffectPayload, EffectTags, GameplayEffect, GameplayEffectApplicationQueue,
+    TagRequirements,
+};
+use bevy_tools::gameplay_tags::{
+    GameplayTag, GameplayTagContainer, GameplayTagManager, GameplayTagRegister,
+};
+use bevy_tools::modifiers::{Modifier, ModifierMagnitude, ModifierOperation};
+use bevy_tools::{
+    AbilityActivationQueue, AbilitySystemComponent, AbilitySystemParams,
+    ActiveGameplayEffectTargetIndex, GameplayAbilitySystemPlugin, apply_gameplay_effect,
+    cleanup_finished_abilities_system, process_ability_activation_queue_system,
+    process_gameplay_effect_application_queue_system, reconcile_active_effect_target_index_system,
+    tick_ability_tasks_system, tick_effect_duration_system, tick_effect_period_system,
+    try_activate_ability_by_handle, update_active_effect_tag_requirements_system,
+};
+use std::sync::Arc;
+
+pub fn test_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, GameplayAbilitySystemPlugin));
+    app
+}
+
+pub fn register_tag(app: &mut App, name: &str) -> GameplayTag {
+    let name = name.to_string();
+    app.world_mut()
+        .run_system_once(move |mut register: GameplayTagRegister| {
+            register.request_or_register_tag(&name).unwrap()
+        })
+        .unwrap()
+}
+
+pub fn register_attribute(app: &mut App, name: &str) -> AttributeId {
+    let name = name.to_string();
+    app.world_mut()
+        .run_system_once(move |mut register: AttributeIdRegister| {
+            register.request_or_register_attribute_id(&name).unwrap()
+        })
+        .unwrap()
+}
+
+pub fn empty_effect_tags() -> EffectTags {
+    effect_tags(Vec::new(), Vec::new())
+}
+
+pub fn effect_tags(asset_tags: Vec<GameplayTag>, granted_tags: Vec<GameplayTag>) -> EffectTags {
+    EffectTags::new(
+        asset_tags,
+        granted_tags,
+        TagRequirements::default(),
+        TagRequirements::default(),
+        TagRequirements::default(),
+        TagRequirements::default(),
+        TagRequirements::default(),
+        TagRequirements::default(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+pub fn add_modifier(attribute: AttributeId, value: f64) -> Modifier {
+    modifier(attribute, ModifierOperation::Add, value)
+}
+
+pub fn modifier(attribute: AttributeId, operation: ModifierOperation, value: f64) -> Modifier {
+    Modifier::new(attribute, operation, ModifierMagnitude::Flat(value))
+}
+
+pub fn attribute_set(
+    attribute: AttributeId,
+    base_value: f64,
+    clamp: AttributeClamp,
+) -> AttributeSet {
+    let mut attributes = AttributeSet::default();
+    attributes.initialize_attribute(attribute, base_value, None, clamp);
+    attributes
+}
+
+pub fn instant_add_effect(attribute: AttributeId, value: f64) -> Arc<GameplayEffect> {
+    Arc::new(GameplayEffect::new(
+        vec![add_modifier(attribute, value)],
+        EffectDurationTicks::Instant,
+        None,
+        1.0,
+        bevy_tools::StackingPolicy::non_stacking(),
+        empty_effect_tags(),
+    ))
+}
+
+pub fn add_tag_to_entity(app: &mut App, entity: Entity, tag: GameplayTag) {
+    app.world_mut()
+        .run_system_once(
+            move |mut query: Query<&mut GameplayTagContainer>,
+                  tag_manager: Res<GameplayTagManager>| {
+                query.get_mut(entity).unwrap().add_tag(&tag, &tag_manager);
+            },
+        )
+        .unwrap();
+}
+
+pub fn remove_tag_from_entity(app: &mut App, entity: Entity, tag: GameplayTag) {
+    app.world_mut()
+        .run_system_once(
+            move |mut query: Query<&mut GameplayTagContainer>,
+                  tag_manager: Res<GameplayTagManager>| {
+                query
+                    .get_mut(entity)
+                    .unwrap()
+                    .remove_tag(&tag, &tag_manager);
+            },
+        )
+        .unwrap();
+}
+
+pub fn apply_effect(
+    app: &mut App,
+    target: Entity,
+    source: Entity,
+    effect: Arc<GameplayEffect>,
+) -> bool {
+    apply_effect_with_payload(app, target, effect, EffectPayload::new(source, None, 1))
+}
+
+pub fn apply_effect_with_payload(
+    app: &mut App,
+    target: Entity,
+    effect: Arc<GameplayEffect>,
+    payload: EffectPayload,
+) -> bool {
+    app.world_mut()
+        .run_system_once(move |mut params: AbilitySystemParams| {
+            apply_gameplay_effect(target, &effect, &mut params, &payload)
+        })
+        .unwrap()
+}
+
+pub fn activate_ability(
+    app: &mut App,
+    source: Entity,
+    target: Entity,
+    handle: AbilitySpecHandle,
+) -> bool {
+    app.world_mut()
+        .run_system_once(move |mut params: AbilitySystemParams| {
+            try_activate_ability_by_handle(source, target, handle, &mut params)
+        })
+        .unwrap()
+}
+
+pub fn current_value(app: &mut App, entity: Entity, attribute: AttributeId) -> f64 {
+    app.world_mut()
+        .entity_mut(entity)
+        .get_mut::<AttributeSet>()
+        .unwrap()
+        .get_current_value(attribute)
+        .unwrap()
+}
+
+pub fn active_effect_handles(app: &App, target: Entity) -> Vec<Entity> {
+    app.world()
+        .resource::<ActiveGameplayEffectTargetIndex>()
+        .handles_for(target)
+        .to_vec()
+}
+
+pub fn give_ability(
+    app: &mut App,
+    owner: Entity,
+    ability: Arc<bevy_tools::GameplayAbility>,
+) -> AbilitySpecHandle {
+    app.world_mut()
+        .entity_mut(owner)
+        .get_mut::<AbilitySystemComponent>()
+        .unwrap()
+        .give_ability(ability, 1, None)
+}
+
+pub fn run_effect_duration_tick(app: &mut App) {
+    app.world_mut()
+        .run_system_once(tick_effect_duration_system)
+        .unwrap();
+}
+
+pub fn run_effect_period_tick(app: &mut App) {
+    app.world_mut()
+        .run_system_once(tick_effect_period_system)
+        .unwrap();
+}
+
+pub fn run_effect_tag_requirements_update(app: &mut App) {
+    app.world_mut()
+        .run_system_once(update_active_effect_tag_requirements_system)
+        .unwrap();
+}
+
+pub fn run_ability_tasks(app: &mut App) {
+    app.world_mut()
+        .run_system_once(tick_ability_tasks_system)
+        .unwrap();
+}
+
+pub fn run_ability_activation_queue(app: &mut App) {
+    app.world_mut()
+        .run_system_once(process_ability_activation_queue_system)
+        .unwrap();
+}
+
+pub fn run_effect_application_queue(app: &mut App) {
+    app.world_mut()
+        .run_system_once(process_gameplay_effect_application_queue_system)
+        .unwrap();
+}
+
+pub fn run_finished_ability_cleanup(app: &mut App) {
+    app.world_mut()
+        .run_system_once(cleanup_finished_abilities_system)
+        .unwrap();
+}
+
+pub fn run_active_effect_index_reconcile(app: &mut App) {
+    app.world_mut()
+        .run_system_once(reconcile_active_effect_target_index_system)
+        .unwrap();
+}
+
+pub fn run_fixed_update(app: &mut App) {
+    app.world_mut().run_schedule(FixedUpdate);
+}
+
+pub fn set_ability_queue_limit(app: &mut App, max_per_tick: usize) {
+    app.world_mut()
+        .resource_mut::<AbilityActivationQueue>()
+        .set_max_activations_per_tick(max_per_tick);
+}
+
+pub fn set_effect_queue_limit(app: &mut App, max_per_tick: usize) {
+    app.world_mut()
+        .resource_mut::<GameplayEffectApplicationQueue>()
+        .set_max_applications_per_tick(max_per_tick);
+}
+
+pub fn spawn_active_ability(
+    app: &mut App,
+    source: Entity,
+    target: Entity,
+    handle: AbilitySpecHandle,
+) -> Entity {
+    app.world_mut()
+        .spawn(ActiveGameplayAbility::new(
+            source,
+            handle,
+            target,
+            bevy_tools::AbilityActivationStatus::Active,
+        ))
+        .id()
+}
+
+pub fn spawn_ability_task(app: &mut App, task: AbilityTask) -> Entity {
+    app.world_mut().spawn(task).id()
+}
+
+pub fn active_ability_count(app: &mut App) -> usize {
+    app.world_mut()
+        .run_system_once(|query: Query<&ActiveGameplayAbility>| query.iter().count())
+        .unwrap()
+}
+
+pub fn ability_task_count(app: &mut App) -> usize {
+    app.world_mut()
+        .run_system_once(|query: Query<&AbilityTask>| query.iter().count())
+        .unwrap()
+}
