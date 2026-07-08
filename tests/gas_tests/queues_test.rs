@@ -1,16 +1,36 @@
-use super::common::{
+use super::common_test::{
     ability_task_count, current_value, instant_add_effect, register_attribute,
     run_ability_activation_queue, run_ability_tasks, run_effect_application_queue,
     set_ability_queue_limit, set_effect_queue_limit, spawn_ability_task, test_app,
 };
 use bevy::prelude::*;
 use bevy_tools::{
-    AbilityActivationQueue, AbilitySpecHandle, AbilitySystemComponent, AbilityTask, AbilityTaskDef,
-    AbilityTaskEvent, AbilityTaskOnFinished, AbilityTaskOnFinishedDef, EffectDurationTicks,
-    EffectPayload, GameplayAbility, GameplayEffect, GameplayEffectApplicationQueue,
+    AbilityActivationContext, AbilityActivationQueue, AbilityActivationStatus, AbilityChainContext,
+    AbilitySpecHandle, AbilitySystemComponent, AbilityTask, AbilityTaskDef, AbilityTaskEvent,
+    AbilityTaskOnFinished, AbilityTaskOnFinishedDef, ActiveGameplayAbility, AttributeId,
+    EffectContext, EffectDurationTicks, EffectPayload, GameplayAbility, GameplayEffect,
+    GameplayEffectApplicationQueue, Modifier, ModifierMagnitude, ModifierMagnitudeCalculation,
     ModifierOperation, StackingPolicy, UniqueName,
 };
 use std::sync::Arc;
+
+struct QueuedEffectContextMagnitude {
+    expected_causer: Entity,
+    snapshot_attribute: AttributeId,
+}
+
+impl ModifierMagnitudeCalculation for QueuedEffectContextMagnitude {
+    fn calculate(&self, context: &EffectContext) -> f64 {
+        if context.causer() != Some(self.expected_causer) {
+            return 0.0;
+        }
+
+        context
+            .source_snapshot()
+            .and_then(|snapshot| snapshot.get_current_value(self.snapshot_attribute))
+            .unwrap_or(0.0)
+    }
+}
 
 #[derive(Resource, Default)]
 struct CapturedAbilityTaskEvent {
@@ -40,7 +60,7 @@ fn effect_application_queue_respects_per_tick_limit() {
     let health = register_attribute(&mut app, "Health");
     let target = app
         .world_mut()
-        .spawn(super::common::attribute_set(
+        .spawn(super::common_test::attribute_set(
             health,
             0.0,
             bevy_tools::AttributeClamp::None,
@@ -100,14 +120,18 @@ fn ability_activation_queue_respects_per_tick_limit() {
         .world_mut()
         .spawn(AbilitySystemComponent::default())
         .id();
-    let first_handle = super::common::give_ability(&mut app, source, first);
-    let second_handle = super::common::give_ability(&mut app, source, second);
+    let first_handle = super::common_test::give_ability(&mut app, source, first);
+    let second_handle = super::common_test::give_ability(&mut app, source, second);
     set_ability_queue_limit(&mut app, 1);
 
     {
         let mut queue = app.world_mut().resource_mut::<AbilityActivationQueue>();
-        queue.push_activation(source, source, first_handle);
-        queue.push_activation(source, source, second_handle);
+        let first_context =
+            AbilityActivationContext::direct(source, queue.new_root_chain(first_handle));
+        let second_context =
+            AbilityActivationContext::direct(source, queue.new_root_chain(second_handle));
+        queue.push_activation(source, source, first_handle, first_context);
+        queue.push_activation(source, source, second_handle, second_context);
     }
 
     run_ability_activation_queue(&mut app);
@@ -144,14 +168,14 @@ fn effect_application_queue_processes_requests_fifo() {
     let health = register_attribute(&mut app, "Health");
     let target = app
         .world_mut()
-        .spawn(super::common::attribute_set(
+        .spawn(super::common_test::attribute_set(
             health,
             0.0,
             bevy_tools::AttributeClamp::None,
         ))
         .id();
     let first = Arc::new(GameplayEffect::new(
-        vec![super::common::modifier(
+        vec![super::common_test::modifier(
             health,
             ModifierOperation::Override,
             1.0,
@@ -160,10 +184,10 @@ fn effect_application_queue_processes_requests_fifo() {
         None,
         1.0,
         StackingPolicy::non_stacking(),
-        super::common::empty_effect_tags(),
+        super::common_test::empty_effect_tags(),
     ));
     let second = Arc::new(GameplayEffect::new(
-        vec![super::common::modifier(
+        vec![super::common_test::modifier(
             health,
             ModifierOperation::Override,
             2.0,
@@ -172,7 +196,7 @@ fn effect_application_queue_processes_requests_fifo() {
         None,
         1.0,
         StackingPolicy::non_stacking(),
-        super::common::empty_effect_tags(),
+        super::common_test::empty_effect_tags(),
     ));
 
     {
@@ -195,11 +219,11 @@ fn ability_activation_queue_processes_requests_fifo() {
         .world_mut()
         .spawn((
             AbilitySystemComponent::default(),
-            super::common::attribute_set(marker, 0.0, bevy_tools::AttributeClamp::None),
+            super::common_test::attribute_set(marker, 0.0, bevy_tools::AttributeClamp::None),
         ))
         .id();
     let first_effect = Arc::new(GameplayEffect::new(
-        vec![super::common::modifier(
+        vec![super::common_test::modifier(
             marker,
             ModifierOperation::Override,
             1.0,
@@ -208,10 +232,10 @@ fn ability_activation_queue_processes_requests_fifo() {
         None,
         1.0,
         StackingPolicy::non_stacking(),
-        super::common::empty_effect_tags(),
+        super::common_test::empty_effect_tags(),
     ));
     let second_effect = Arc::new(GameplayEffect::new(
-        vec![super::common::modifier(
+        vec![super::common_test::modifier(
             marker,
             ModifierOperation::Override,
             2.0,
@@ -220,7 +244,7 @@ fn ability_activation_queue_processes_requests_fifo() {
         None,
         1.0,
         StackingPolicy::non_stacking(),
-        super::common::empty_effect_tags(),
+        super::common_test::empty_effect_tags(),
     ));
     let first = Arc::new(GameplayAbility::new(
         bevy_tools::AbilityTags::default(),
@@ -240,13 +264,17 @@ fn ability_activation_queue_processes_requests_fifo() {
         true,
         false,
     ));
-    let first_handle = super::common::give_ability(&mut app, source, first);
-    let second_handle = super::common::give_ability(&mut app, source, second);
+    let first_handle = super::common_test::give_ability(&mut app, source, first);
+    let second_handle = super::common_test::give_ability(&mut app, source, second);
 
     {
         let mut queue = app.world_mut().resource_mut::<AbilityActivationQueue>();
-        queue.push_activation(source, source, first_handle);
-        queue.push_activation(source, source, second_handle);
+        let first_context =
+            AbilityActivationContext::direct(source, queue.new_root_chain(first_handle));
+        let second_context =
+            AbilityActivationContext::direct(source, queue.new_root_chain(second_handle));
+        queue.push_activation(source, source, first_handle, first_context);
+        queue.push_activation(source, source, second_handle, second_context);
     }
 
     run_ability_activation_queue(&mut app);
@@ -275,14 +303,18 @@ fn task_can_enqueue_gameplay_effect_application() {
     let source = app.world_mut().spawn_empty().id();
     let target = app
         .world_mut()
-        .spawn(super::common::attribute_set(
+        .spawn(super::common_test::attribute_set(
             health,
             10.0,
             bevy_tools::AttributeClamp::None,
         ))
         .id();
-    let active =
-        super::common::spawn_active_ability(&mut app, source, target, AbilitySpecHandle::new(123));
+    let active = super::common_test::spawn_active_ability(
+        &mut app,
+        source,
+        target,
+        AbilitySpecHandle::new(123),
+    );
     let effect = instant_add_effect(health, 5.0);
     spawn_ability_task(
         &mut app,
@@ -311,6 +343,83 @@ fn task_can_enqueue_gameplay_effect_application() {
 }
 
 #[test]
+fn task_effect_application_inherits_activation_context_payload() {
+    let mut app = test_app();
+    let power = register_attribute(&mut app, "Power");
+    let damage = register_attribute(&mut app, "Damage");
+    let causer = app.world_mut().spawn_empty().id();
+    let source = app
+        .world_mut()
+        .spawn(super::common_test::attribute_set(
+            power,
+            11.0,
+            bevy_tools::AttributeClamp::None,
+        ))
+        .id();
+    let target = app
+        .world_mut()
+        .spawn(super::common_test::attribute_set(
+            damage,
+            0.0,
+            bevy_tools::AttributeClamp::None,
+        ))
+        .id();
+    let snapshot = app
+        .world_mut()
+        .entity_mut(source)
+        .get_mut::<bevy_tools::AttributeSet>()
+        .unwrap()
+        .make_snapshot(source);
+    let handle = AbilitySpecHandle::new(456);
+    let context = AbilityActivationContext::direct(source, AbilityChainContext::root(handle, 0))
+        .with_causer(Some(causer))
+        .with_source_snapshot(snapshot);
+    let active = app
+        .world_mut()
+        .spawn(ActiveGameplayAbility::new(
+            source,
+            handle,
+            target,
+            AbilityActivationStatus::Active,
+            context,
+        ))
+        .id();
+    let effect = Arc::new(GameplayEffect::new(
+        vec![Modifier::new(
+            damage,
+            ModifierOperation::Add,
+            ModifierMagnitude::Calculated(Box::new(QueuedEffectContextMagnitude {
+                expected_causer: causer,
+                snapshot_attribute: power,
+            })),
+        )],
+        EffectDurationTicks::Instant,
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        super::common_test::empty_effect_tags(),
+    ));
+
+    spawn_ability_task(
+        &mut app,
+        AbilityTask::instant(
+            active,
+            AbilityTaskOnFinished::ApplyGameplayEffect {
+                source,
+                target,
+                effect,
+                level: 1,
+            },
+        ),
+    );
+
+    run_ability_tasks(&mut app);
+    run_effect_application_queue(&mut app);
+
+    assert_eq!(current_value(&mut app, target, damage), 11.0);
+}
+
+#[test]
 fn task_can_enqueue_ability_activation() {
     let mut app = test_app();
     let source = app
@@ -327,9 +436,13 @@ fn task_can_enqueue_ability_activation() {
         true,
         false,
     ));
-    let handle = super::common::give_ability(&mut app, source, ability);
-    let active =
-        super::common::spawn_active_ability(&mut app, source, target, AbilitySpecHandle::new(321));
+    let handle = super::common_test::give_ability(&mut app, source, ability);
+    let active = super::common_test::spawn_active_ability(
+        &mut app,
+        source,
+        target,
+        AbilitySpecHandle::new(321),
+    );
     spawn_ability_task(
         &mut app,
         AbilityTask::instant(
@@ -362,7 +475,7 @@ fn task_emit_event_triggers_observer_with_full_payload() {
         .world_mut()
         .resource_mut::<bevy_tools::UniqueNamePool>()
         .new_name("Ability.Event.ComboWindow");
-    let active = super::common::spawn_active_ability(&mut app, source, target, handle);
+    let active = super::common_test::spawn_active_ability(&mut app, source, target, handle);
     let task = AbilityTaskDef::instant(AbilityTaskOnFinishedDef::EmitEvent { event_id })
         .instantiate(active, source, target, handle, 9);
     spawn_ability_task(&mut app, task);

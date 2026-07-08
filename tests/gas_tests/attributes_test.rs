@@ -1,4 +1,4 @@
-use super::common::{
+use super::common_test::{
     active_effect_handles, apply_effect, attribute_set, current_value, empty_effect_tags,
     register_attribute, run_effect_duration_tick, test_app,
 };
@@ -39,7 +39,7 @@ fn duration_modifier_is_clamped_and_removed_on_expiration() {
         ))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 20.0)],
+        vec![super::common_test::add_modifier(health, 20.0)],
         EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(2.0)),
         None,
         1.0,
@@ -110,9 +110,9 @@ fn duration_modifiers_use_add_percent_then_multiply_order() {
         .id();
     let effect = Arc::new(GameplayEffect::new(
         vec![
-            super::common::modifier(damage, ModifierOperation::Multiply, 2.0),
-            super::common::modifier(damage, ModifierOperation::PercentAdd, 0.5),
-            super::common::modifier(damage, ModifierOperation::Add, 10.0),
+            super::common_test::modifier(damage, ModifierOperation::Multiply, 2.0),
+            super::common_test::modifier(damage, ModifierOperation::PercentAdd, 0.5),
+            super::common_test::modifier(damage, ModifierOperation::Add, 10.0),
         ],
         EffectDurationTicks::Infinite,
         None,
@@ -135,9 +135,9 @@ fn override_modifier_takes_precedence_over_other_duration_modifiers() {
         .id();
     let effect = Arc::new(GameplayEffect::new(
         vec![
-            super::common::modifier(damage, ModifierOperation::Add, 10.0),
-            super::common::modifier(damage, ModifierOperation::Multiply, 2.0),
-            super::common::modifier(damage, ModifierOperation::Override, 42.0),
+            super::common_test::modifier(damage, ModifierOperation::Add, 10.0),
+            super::common_test::modifier(damage, ModifierOperation::Multiply, 2.0),
+            super::common_test::modifier(damage, ModifierOperation::Override, 42.0),
         ],
         EffectDurationTicks::Infinite,
         None,
@@ -160,7 +160,7 @@ fn modifiers_targeting_uninitialized_attribute_do_not_create_values() {
         .spawn(attribute_set(health, 10.0, AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(mana, 5.0)],
+        vec![super::common_test::add_modifier(mana, 5.0)],
         EffectDurationTicks::Instant,
         None,
         1.0,
@@ -189,7 +189,7 @@ fn removing_missing_modifier_handle_does_not_change_current_value() {
         .spawn(attribute_set(health, 10.0, AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 5.0)],
+        vec![super::common_test::add_modifier(health, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -221,7 +221,7 @@ fn instant_modifier_invokes_post_execute_callback() {
         &mut app,
         target,
         target,
-        super::common::instant_add_effect(health, 5.0),
+        super::common_test::instant_add_effect(health, 5.0),
     ));
 
     assert_eq!(POST_EXECUTE_COUNT.load(Ordering::SeqCst), 1);
@@ -266,7 +266,7 @@ fn attribute_set_snapshot_captures_base_current_and_source_entity() {
         .spawn(attribute_set(health, 10.0, AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 5.0)],
+        vec![super::common_test::add_modifier(health, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -306,7 +306,7 @@ fn attribute_set_snapshot_is_not_changed_by_later_attribute_mutation() {
         &mut app,
         source,
         source,
-        super::common::instant_add_effect(health, 20.0),
+        super::common_test::instant_add_effect(health, 20.0),
     ));
 
     assert_eq!(current_value(&mut app, source, health), 30.0);

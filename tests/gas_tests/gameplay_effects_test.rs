@@ -1,4 +1,4 @@
-use super::common::{
+use super::common_test::{
     active_effect_handles, add_tag_to_entity, apply_effect, attribute_set, current_value,
     effect_tags, empty_effect_tags, register_attribute, register_tag, run_effect_duration_tick,
     run_effect_period_tick, run_effect_tag_requirements_update, test_app,
@@ -43,7 +43,7 @@ fn periodic_effect_executes_on_application_and_each_period() {
         ))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 2.0)],
+        vec![super::common_test::add_modifier(health, 2.0)],
         EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(10.0)),
         Some(EffectPeriodTicks::new(ModifierMagnitude::Flat(2.0), true)),
         1.0,
@@ -70,7 +70,7 @@ fn linear_stacking_respects_stack_limit() {
         .spawn(attribute_set(power, 10.0, bevy_tools::AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(power, 5.0)],
+        vec![super::common_test::add_modifier(power, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -113,7 +113,7 @@ fn remove_single_stack_expiration_decrements_stack_before_removal() {
         StackExpirationPolicy::RemoveSingleStack,
     );
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(armor, 5.0)],
+        vec![super::common_test::add_modifier(armor, 5.0)],
         EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(1.0)),
         None,
         1.0,
@@ -156,7 +156,7 @@ fn remove_effects_with_tags_cleans_existing_effect_before_new_application() {
         ))
         .id();
     let old_effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(damage, 10.0)],
+        vec![super::common_test::add_modifier(damage, 10.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -176,7 +176,7 @@ fn remove_effects_with_tags_cleans_existing_effect_before_new_application() {
         vec![buff_tag],
     );
     let replacing_effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(damage, 1.0)],
+        vec![super::common_test::add_modifier(damage, 1.0)],
         EffectDurationTicks::Instant,
         None,
         1.0,
@@ -205,7 +205,7 @@ fn probability_zero_blocks_application_and_one_allows_it() {
         ))
         .id();
     let blocked = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 10.0)],
+        vec![super::common_test::add_modifier(health, 10.0)],
         EffectDurationTicks::Instant,
         None,
         0.0,
@@ -213,7 +213,7 @@ fn probability_zero_blocks_application_and_one_allows_it() {
         empty_effect_tags(),
     ));
     let allowed = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 10.0)],
+        vec![super::common_test::add_modifier(health, 10.0)],
         EffectDurationTicks::Instant,
         None,
         1.0,
@@ -242,7 +242,7 @@ fn non_positive_or_nan_duration_ticks_reject_application() {
 
     for duration in [0.0, -1.0, f64::NAN] {
         let effect = Arc::new(GameplayEffect::new(
-            vec![super::common::add_modifier(health, 10.0)],
+            vec![super::common_test::add_modifier(health, 10.0)],
             EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(duration)),
             None,
             1.0,
@@ -269,7 +269,7 @@ fn zero_tick_period_behaves_like_duration_modifier_without_period_ticks() {
         ))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 5.0)],
+        vec![super::common_test::add_modifier(health, 5.0)],
         EffectDurationTicks::Infinite,
         Some(EffectPeriodTicks::new(ModifierMagnitude::Flat(0.0), true)),
         1.0,
@@ -302,7 +302,7 @@ fn overflow_refresh_duration_extends_existing_stack_lifetime() {
         StackExpirationPolicy::RemoveAllStacks,
     );
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(armor, 5.0)],
+        vec![super::common_test::add_modifier(armor, 5.0)],
         EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(2.0)),
         None,
         1.0,
@@ -334,7 +334,7 @@ fn aggregate_by_source_keeps_separate_stacks_per_source() {
         .spawn(attribute_set(power, 10.0, bevy_tools::AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(power, 5.0)],
+        vec![super::common_test::add_modifier(power, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -390,7 +390,7 @@ fn active_immunity_blocks_matching_incoming_effect() {
         ),
     ));
     let incoming = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, -25.0)],
+        vec![super::common_test::add_modifier(health, -25.0)],
         EffectDurationTicks::Instant,
         None,
         1.0,
@@ -417,7 +417,7 @@ fn ongoing_tag_requirements_inhibit_and_restore_active_effect() {
         ))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(power, 10.0)],
+        vec![super::common_test::add_modifier(power, 10.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -474,7 +474,7 @@ fn removal_tag_requirement_cleans_up_active_effect() {
         ))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(power, 5.0)],
+        vec![super::common_test::add_modifier(power, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -505,7 +505,7 @@ fn tag_granting_effect_without_tag_container_rolls_back_modifiers() {
         .spawn(attribute_set(power, 10.0, bevy_tools::AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(power, 5.0)],
+        vec![super::common_test::add_modifier(power, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,

@@ -1,15 +1,15 @@
-use super::common::{
+use super::common_test::{
     active_effect_handles, add_tag_to_entity, apply_effect_with_payload, attribute_set,
     current_value, empty_effect_tags, register_attribute, register_tag,
     run_active_effect_index_reconcile, run_fixed_update, test_app,
 };
 use bevy::prelude::*;
 use bevy_tools::{
-    AbilityActivationQueue, AbilitySystemComponent, AbilityTaskDef, AbilityTaskOnFinishedDef,
-    AttributeClamp, AttributeId, AttributeSet, EffectContext, EffectDurationTicks, EffectPayload,
-    GameplayAbility, GameplayEffect, GameplayEffectApplicationQueue, GameplayTag,
-    GameplayTagContainer, Modifier, ModifierMagnitude, ModifierMagnitudeCalculation,
-    ModifierOperation, StackingPolicy,
+    AbilityActivationContext, AbilityActivationQueue, AbilitySystemComponent, AbilityTaskDef,
+    AbilityTaskOnFinishedDef, AttributeClamp, AttributeId, AttributeSet, EffectContext,
+    EffectDurationTicks, EffectPayload, GameplayAbility, GameplayEffect,
+    GameplayEffectApplicationQueue, GameplayTag, GameplayTagContainer, Modifier, ModifierMagnitude,
+    ModifierMagnitudeCalculation, ModifierOperation, StackingPolicy,
 };
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ fn fixed_update_processes_queued_effect_before_next_duration_tick() {
         .spawn(attribute_set(health, 10.0, AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(health, 5.0)],
+        vec![super::common_test::add_modifier(health, 5.0)],
         EffectDurationTicks::DurationTicks(ModifierMagnitude::Flat(1.0)),
         None,
         1.0,
@@ -102,19 +102,21 @@ fn fixed_update_activation_tasks_and_cleanup_run_in_plugin_order() {
         false,
         false,
     ));
-    let handle = super::common::give_ability(&mut app, source, ability);
+    let handle = super::common_test::give_ability(&mut app, source, ability);
 
-    app.world_mut()
-        .resource_mut::<AbilityActivationQueue>()
-        .push_activation(source, source, handle);
-
-    run_fixed_update(&mut app);
-    assert_eq!(super::common::active_ability_count(&mut app), 1);
-    assert_eq!(super::common::ability_task_count(&mut app), 1);
+    {
+        let mut queue = app.world_mut().resource_mut::<AbilityActivationQueue>();
+        let context = AbilityActivationContext::direct(source, queue.new_root_chain(handle));
+        queue.push_activation(source, source, handle, context);
+    }
 
     run_fixed_update(&mut app);
-    assert_eq!(super::common::active_ability_count(&mut app), 0);
-    assert_eq!(super::common::ability_task_count(&mut app), 0);
+    assert_eq!(super::common_test::active_ability_count(&mut app), 1);
+    assert_eq!(super::common_test::ability_task_count(&mut app), 1);
+
+    run_fixed_update(&mut app);
+    assert_eq!(super::common_test::active_ability_count(&mut app), 0);
+    assert_eq!(super::common_test::ability_task_count(&mut app), 0);
     assert_eq!(
         app.world()
             .entity(source)
@@ -244,7 +246,7 @@ fn reconcile_removes_externally_despawned_active_effect_from_target_index() {
         .spawn(attribute_set(power, 10.0, AttributeClamp::None))
         .id();
     let effect = Arc::new(GameplayEffect::new(
-        vec![super::common::add_modifier(power, 5.0)],
+        vec![super::common_test::add_modifier(power, 5.0)],
         EffectDurationTicks::Infinite,
         None,
         1.0,
@@ -252,7 +254,7 @@ fn reconcile_removes_externally_despawned_active_effect_from_target_index() {
         empty_effect_tags(),
     ));
 
-    assert!(super::common::apply_effect(
+    assert!(super::common_test::apply_effect(
         &mut app, target, target, effect
     ));
     let handle = active_effect_handles(&app, target)[0];

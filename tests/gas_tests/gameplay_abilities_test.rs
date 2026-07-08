@@ -1,14 +1,38 @@
-use super::common::{
-    ability_task_count, activate_ability, active_ability_count, add_tag_to_entity, attribute_set,
-    current_value, effect_tags, give_ability, register_attribute, register_tag, run_ability_tasks,
-    run_finished_ability_cleanup, spawn_ability_task, spawn_active_ability, test_app,
+use super::common_test::{
+    ability_task_count, activate_ability, activate_ability_result, activate_ability_with_context,
+    active_ability_context_for_spec, active_ability_count, active_ability_entity_for_spec,
+    add_tag_to_entity, attribute_set, current_value, effect_tags, give_ability, register_attribute,
+    register_tag, run_ability_activation_queue, run_ability_tasks, run_finished_ability_cleanup,
+    spawn_ability_task, spawn_active_ability, test_app,
 };
+use bevy::prelude::*;
 use bevy_tools::{
-    AbilityActivationStatus, AbilitySpecHandle, AbilitySystemComponent, AbilityTags, AbilityTask,
-    AbilityTaskDef, AbilityTaskOnFinished, AbilityTaskOnFinishedDef, EffectDurationTicks,
-    GameplayAbility, GameplayTagContainer, StackingPolicy,
+    AbilityActivationContext, AbilityActivationError, AbilityActivationReason,
+    AbilityActivationStatus, AbilityChainContext, AbilityChainError, AbilitySpecHandle,
+    AbilitySystemComponent, AbilityTags, AbilityTask, AbilityTaskDef, AbilityTaskOnFinished,
+    AbilityTaskOnFinishedDef, AttributeId, EffectContext, EffectDurationTicks, GameplayAbility,
+    GameplayEffect, GameplayTagContainer, Modifier, ModifierMagnitude,
+    ModifierMagnitudeCalculation, ModifierOperation, StackingPolicy,
 };
 use std::sync::Arc;
+
+struct ContextPayloadMagnitude {
+    expected_causer: Entity,
+    snapshot_attribute: AttributeId,
+}
+
+impl ModifierMagnitudeCalculation for ContextPayloadMagnitude {
+    fn calculate(&self, context: &EffectContext) -> f64 {
+        if context.causer() != Some(self.expected_causer) {
+            return 0.0;
+        }
+
+        context
+            .source_snapshot()
+            .and_then(|snapshot| snapshot.get_current_value(self.snapshot_attribute))
+            .unwrap_or(0.0)
+    }
+}
 
 #[test]
 fn ability_activation_commits_cost_and_cooldown_then_cooldown_blocks_reactivation() {
@@ -23,7 +47,7 @@ fn ability_activation_commits_cost_and_cooldown_then_cooldown_blocks_reactivatio
             attribute_set(mana, 50.0, bevy_tools::AttributeClamp::None),
         ))
         .id();
-    let cost = super::common::instant_add_effect(mana, -20.0);
+    let cost = super::common_test::instant_add_effect(mana, -20.0);
     let cooldown = Arc::new(bevy_tools::GameplayEffect::new(
         Vec::new(),
         EffectDurationTicks::Infinite,
@@ -83,7 +107,7 @@ fn ability_cost_fails_when_it_would_drop_attribute_below_zero() {
         AbilityTags::default(),
         Vec::new(),
         None,
-        Some(super::common::instant_add_effect(stamina, -20.0)),
+        Some(super::common_test::instant_add_effect(stamina, -20.0)),
         Vec::new(),
         true,
         false,
@@ -358,7 +382,7 @@ fn cooldown_prepare_failure_does_not_spend_ability_cost() {
         AbilityTags::default(),
         Vec::new(),
         Some(cooldown),
-        Some(super::common::instant_add_effect(mana, -20.0)),
+        Some(super::common_test::instant_add_effect(mana, -20.0)),
         Vec::new(),
         true,
         false,
@@ -529,5 +553,213 @@ fn clear_ability_returns_false_while_spec_is_active() {
             .unwrap()
             .find_ability_spec(handle)
             .is_some()
+    );
+}
+
+#[test]
+fn try_activate_ability_by_handle_returns_error_for_missing_spec() {
+    let mut app = test_app();
+    let source = app
+        .world_mut()
+        .spawn(AbilitySystemComponent::default())
+        .id();
+    let missing_handle = AbilitySpecHandle::new(999);
+
+    let err = activate_ability_result(&mut app, source, source, missing_handle).unwrap_err();
+
+    assert_eq!(
+        err,
+        AbilityActivationError::AbilityNotFound {
+            source,
+            handle: missing_handle
+        }
+    );
+}
+
+#[test]
+fn chained_ability_activation_blocks_cycles() {
+    let mut app = test_app();
+    let source = app
+        .world_mut()
+        .spawn(AbilitySystemComponent::default())
+        .id();
+    let first_handle = AbilitySpecHandle::new(0);
+    let second_handle = AbilitySpecHandle::new(1);
+    let first = Arc::new(GameplayAbility::new(
+        AbilityTags::default(),
+        vec![AbilityTaskDef::instant(
+            AbilityTaskOnFinishedDef::ActivateAbility {
+                handle: second_handle,
+            },
+        )],
+        None,
+        None,
+        Vec::new(),
+        false,
+        true,
+    ));
+    let second = Arc::new(GameplayAbility::new(
+        AbilityTags::default(),
+        vec![AbilityTaskDef::instant(
+            AbilityTaskOnFinishedDef::ActivateAbility {
+                handle: first_handle,
+            },
+        )],
+        None,
+        None,
+        Vec::new(),
+        false,
+        true,
+    ));
+
+    assert_eq!(give_ability(&mut app, source, first), first_handle);
+    assert_eq!(give_ability(&mut app, source, second), second_handle);
+
+    assert!(activate_ability(&mut app, source, source, first_handle));
+    run_ability_tasks(&mut app);
+    assert_eq!(
+        app.world()
+            .resource::<bevy_tools::AbilityActivationQueue>()
+            .len(),
+        1
+    );
+
+    run_ability_activation_queue(&mut app);
+    assert_eq!(active_ability_count(&mut app), 2);
+
+    run_ability_tasks(&mut app);
+    assert!(
+        app.world()
+            .resource::<bevy_tools::AbilityActivationQueue>()
+            .is_empty()
+    );
+    assert_eq!(active_ability_count(&mut app), 2);
+    assert_eq!(
+        app.world()
+            .entity(source)
+            .get::<AbilitySystemComponent>()
+            .unwrap()
+            .find_ability_spec(first_handle)
+            .unwrap()
+            .get_active_count(),
+        1
+    );
+}
+
+#[test]
+fn chained_activation_inherits_context_and_activation_effects_use_payload() {
+    let mut app = test_app();
+    let power = register_attribute(&mut app, "Power");
+    let damage = register_attribute(&mut app, "Damage");
+    let causer = app.world_mut().spawn_empty().id();
+    let source = app
+        .world_mut()
+        .spawn((
+            AbilitySystemComponent::default(),
+            attribute_set(power, 7.0, bevy_tools::AttributeClamp::None),
+        ))
+        .id();
+    let target = app
+        .world_mut()
+        .spawn(attribute_set(damage, 0.0, bevy_tools::AttributeClamp::None))
+        .id();
+    let source_snapshot = app
+        .world_mut()
+        .entity_mut(source)
+        .get_mut::<bevy_tools::AttributeSet>()
+        .unwrap()
+        .make_snapshot(source);
+    let first_handle = AbilitySpecHandle::new(0);
+    let second_handle = AbilitySpecHandle::new(1);
+    let first = Arc::new(GameplayAbility::new(
+        AbilityTags::default(),
+        vec![AbilityTaskDef::instant(
+            AbilityTaskOnFinishedDef::ActivateAbility {
+                handle: second_handle,
+            },
+        )],
+        None,
+        None,
+        Vec::new(),
+        false,
+        true,
+    ));
+    let activation_effect = Arc::new(GameplayEffect::new(
+        vec![Modifier::new(
+            damage,
+            ModifierOperation::Add,
+            ModifierMagnitude::Calculated(Box::new(ContextPayloadMagnitude {
+                expected_causer: causer,
+                snapshot_attribute: power,
+            })),
+        )],
+        EffectDurationTicks::Instant,
+        None,
+        1.0,
+        StackingPolicy::non_stacking(),
+        super::common_test::empty_effect_tags(),
+    ));
+    let second = Arc::new(GameplayAbility::new(
+        AbilityTags::default(),
+        Vec::new(),
+        None,
+        None,
+        vec![activation_effect],
+        false,
+        true,
+    ));
+
+    assert_eq!(give_ability(&mut app, source, first), first_handle);
+    assert_eq!(give_ability(&mut app, source, second), second_handle);
+
+    let context =
+        AbilityActivationContext::direct(source, AbilityChainContext::root(first_handle, 0))
+            .with_causer(Some(causer))
+            .with_source_snapshot(source_snapshot);
+    activate_ability_with_context(&mut app, source, target, first_handle, context).unwrap();
+    let first_active = active_ability_entity_for_spec(&mut app, first_handle).unwrap();
+
+    run_ability_tasks(&mut app);
+    run_ability_activation_queue(&mut app);
+
+    assert_eq!(current_value(&mut app, target, damage), 7.0);
+    let second_context = active_ability_context_for_spec(&mut app, second_handle).unwrap();
+    assert_eq!(second_context.get_instigator(), source);
+    assert_eq!(second_context.get_causer(), Some(causer));
+    assert_eq!(
+        second_context
+            .get_source_snapshot()
+            .unwrap()
+            .get_current_value(power),
+        Some(7.0)
+    );
+    assert_eq!(
+        second_context.get_reason(),
+        AbilityActivationReason::Chained {
+            parent_ability: first_active,
+        }
+    );
+    assert_eq!(second_context.get_chain().unwrap().get_depth(), 1);
+    assert_eq!(
+        second_context.get_chain().unwrap().get_visited(),
+        &[first_handle, second_handle]
+    );
+}
+
+#[test]
+fn ability_chain_context_rejects_depth_beyond_limit() {
+    let mut chain = AbilityChainContext::root(AbilitySpecHandle::new(0), 42);
+    for index in 1..=AbilityChainContext::MAX_DEPTH {
+        chain = chain.next(AbilitySpecHandle::new(index as u32)).unwrap();
+    }
+
+    let err = chain.next(AbilitySpecHandle::new(99)).unwrap_err();
+
+    assert_eq!(
+        err,
+        AbilityChainError::DepthExceeded {
+            chain_id: 42,
+            max_depth: AbilityChainContext::MAX_DEPTH,
+        }
     );
 }

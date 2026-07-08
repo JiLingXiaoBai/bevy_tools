@@ -1,7 +1,8 @@
 use crate::attributes::{AttributeSet, AttributeSetSnapshot};
 use crate::gameplay_abilities::{
-    AbilityActivationStatus, AbilitySpecHandle, AbilityTaskDef, ActiveAbilityHandle,
-    ActiveGameplayAbility, GameplayAbility, GameplayAbilitySpec,
+    AbilityActivationContext, AbilityActivationStatus, AbilityChainError, AbilitySpecHandle,
+    AbilityTaskDef, ActiveAbilityHandle, ActiveGameplayAbility, GameplayAbility,
+    GameplayAbilitySpec,
 };
 use crate::gameplay_effects::{
     ActiveEffectDurationTicks, ActiveEffectPeriodTicks, ActiveGameplayEffect,
@@ -17,6 +18,8 @@ use crate::{
 use bevy::ecs::system::SystemParam;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use std::error::Error;
+use std::fmt;
 use std::sync::Arc;
 
 #[derive(SystemParam)]
@@ -119,14 +122,21 @@ impl AbilitySystemComponent {
         source: Entity,
         target: Entity,
         spec_handle: AbilitySpecHandle,
-        ability: &GameplayAbility,
+        activation_context: AbilityActivationContext,
         commands: &mut Commands,
         tag_manager: &Res<GameplayTagManager>,
     ) -> ActiveAbilityHandle {
-        self.blocked_ability_tags.add_tags(
-            ability.get_tags().get_block_abilities_with_tags(),
-            tag_manager,
-        );
+        let blocked_tags = self
+            .find_ability_spec(spec_handle)
+            .map(|spec| {
+                spec.get_ability()
+                    .get_tags()
+                    .get_block_abilities_with_tags()
+                    .to_vec()
+            })
+            .unwrap_or_default();
+        self.blocked_ability_tags
+            .add_tags(&blocked_tags, tag_manager);
 
         if let Some(spec) = self.find_ability_spec_mut(spec_handle) {
             spec.increment_active_count();
@@ -137,6 +147,7 @@ impl AbilitySystemComponent {
             spec_handle,
             target,
             AbilityActivationStatus::Active,
+            activation_context,
         ));
         let active_handle = entity_cmds.id();
         entity_cmds.set_parent_in_place(source);
@@ -187,18 +198,113 @@ impl AbilitySystemComponent {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbilityActivationError {
+    InvalidChain(AbilityChainError),
+    MissingAbilitySystemComponent {
+        source: Entity,
+    },
+    AbilityNotFound {
+        source: Entity,
+        handle: AbilitySpecHandle,
+    },
+    MultipleInstancesNotAllowed {
+        source: Entity,
+        handle: AbilitySpecHandle,
+    },
+    ActivationRequirementsNotMet {
+        source: Entity,
+        handle: AbilitySpecHandle,
+    },
+    CommitPreparationFailed {
+        source: Entity,
+        handle: AbilitySpecHandle,
+    },
+    StartFailed {
+        source: Entity,
+        handle: AbilitySpecHandle,
+    },
+    CommitExecutionFailed {
+        source: Entity,
+        handle: AbilitySpecHandle,
+    },
+}
+
+impl fmt::Display for AbilityActivationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AbilityActivationError::InvalidChain(err) => {
+                write!(f, "ability activation failed: {err}")
+            }
+            AbilityActivationError::MissingAbilitySystemComponent { source } => write!(
+                f,
+                "ability activation failed: source entity {source:?} has no AbilitySystemComponent"
+            ),
+            AbilityActivationError::AbilityNotFound { source, handle } => write!(
+                f,
+                "ability activation failed: source entity {source:?} has no ability handle {}",
+                handle.get_value()
+            ),
+            AbilityActivationError::MultipleInstancesNotAllowed { source, handle } => write!(
+                f,
+                "ability activation failed: source entity {source:?} ability handle {} is already active",
+                handle.get_value()
+            ),
+            AbilityActivationError::ActivationRequirementsNotMet { source, handle } => write!(
+                f,
+                "ability activation failed: source entity {source:?} ability handle {} does not meet activation requirements",
+                handle.get_value()
+            ),
+            AbilityActivationError::CommitPreparationFailed { source, handle } => write!(
+                f,
+                "ability activation failed: source entity {source:?} ability handle {} could not prepare cost or cooldown",
+                handle.get_value()
+            ),
+            AbilityActivationError::StartFailed { source, handle } => write!(
+                f,
+                "ability activation failed: source entity {source:?} ability handle {} could not start",
+                handle.get_value()
+            ),
+            AbilityActivationError::CommitExecutionFailed { source, handle } => write!(
+                f,
+                "ability activation failed: source entity {source:?} ability handle {} could not execute cost or cooldown",
+                handle.get_value()
+            ),
+        }
+    }
+}
+
+impl Error for AbilityActivationError {}
+
+fn ability_activation_failed(err: AbilityActivationError) -> Result<(), AbilityActivationError> {
+    error!("{err}");
+    Err(err)
+}
+
 pub fn try_activate_ability_by_handle(
     source: Entity,
     target: Entity,
     handle: AbilitySpecHandle,
+    activation_context: AbilityActivationContext,
     params: &mut AbilitySystemParams,
-) -> bool {
+) -> Result<(), AbilityActivationError> {
+    if let Some(chain) = activation_context.get_chain()
+        && let Err(err) = chain.validate_for_handle(handle)
+    {
+        return ability_activation_failed(AbilityActivationError::InvalidChain(err));
+    }
+
     let (ability, level) = {
         let Ok(asc) = params.asc_query.get(source) else {
-            return false;
+            return ability_activation_failed(
+                AbilityActivationError::MissingAbilitySystemComponent { source },
+            );
         };
         let Some(spec) = asc.find_ability_spec(handle) else {
-            return false;
+            return ability_activation_failed(AbilityActivationError::AbilityNotFound {
+                source,
+                handle,
+            });
         };
         (spec.get_ability().clone(), spec.get_level())
     };
@@ -211,35 +317,54 @@ pub fn try_activate_ability_by_handle(
 
     let active_count = {
         let Ok(asc) = params.asc_query.get(source) else {
-            return false;
+            return ability_activation_failed(
+                AbilityActivationError::MissingAbilitySystemComponent { source },
+            );
         };
         let Some(spec) = asc.find_ability_spec(handle) else {
-            return false;
+            return ability_activation_failed(AbilityActivationError::AbilityNotFound {
+                source,
+                handle,
+            });
         };
         spec.get_active_count()
     };
 
     if !ability.allow_multiple_instances() && active_count > 0 {
-        return false;
+        return ability_activation_failed(AbilityActivationError::MultipleInstancesNotAllowed {
+            source,
+            handle,
+        });
     }
 
     if !passes_ability_activation_requirements(source, &ability, params) {
-        return false;
+        return ability_activation_failed(AbilityActivationError::ActivationRequirementsNotMet {
+            source,
+            handle,
+        });
     }
 
-    let Some(commit_plans) = prepare_ability_commit_plans(source, &ability, level, params) else {
-        return false;
+    let Some(commit_plans) =
+        prepare_ability_commit_plans(source, &ability, level, Some(&activation_context), params)
+    else {
+        return ability_activation_failed(AbilityActivationError::CommitPreparationFailed {
+            source,
+            handle,
+        });
     };
 
     let active_handle = {
         let Ok(mut asc) = params.asc_query.get_mut(source) else {
-            return false;
+            return ability_activation_failed(AbilityActivationError::StartFailed {
+                source,
+                handle,
+            });
         };
         asc.start_ability(
             source,
             target,
             handle,
-            &ability,
+            activation_context.clone(),
             &mut params.commands,
             &params.tag_manager,
         )
@@ -254,12 +379,15 @@ pub fn try_activate_ability_by_handle(
                 &params.tag_manager,
             );
         }
-        return false;
+        return ability_activation_failed(AbilityActivationError::CommitExecutionFailed {
+            source,
+            handle,
+        });
     }
 
     for effect in ability.get_activation_effects() {
         // Activation effects are best-effort; cost/cooldown commit already decided activation success.
-        let payload = EffectPayload::new(source, None, level);
+        let payload = effect_payload_from_activation_context(source, level, &activation_context);
         let _ = apply_gameplay_effect(target, effect, params, &payload);
     }
 
@@ -282,10 +410,11 @@ pub fn try_activate_ability_by_handle(
                 handle,
                 target,
                 AbilityActivationStatus::Ending,
+                activation_context,
             ));
     }
 
-    true
+    Ok(())
 }
 
 fn spawn_startup_ability_tasks(
@@ -383,7 +512,7 @@ pub fn commit_ability(
     level: u32,
     params: &mut AbilitySystemParams,
 ) -> bool {
-    let Some(plans) = prepare_ability_commit_plans(source, ability, level, params) else {
+    let Some(plans) = prepare_ability_commit_plans(source, ability, level, None, params) else {
         return false;
     };
 
@@ -399,13 +528,15 @@ fn prepare_ability_commit_plans(
     source: Entity,
     ability: &Arc<GameplayAbility>,
     level: u32,
+    activation_context: Option<&AbilityActivationContext>,
     params: &mut AbilitySystemParams,
 ) -> Option<AbilityCommitPlans> {
     let cost_plan = if let Some(cost_def) = ability.get_cost() {
         if !cost_def.has_only_add_modifiers() {
             return None;
         }
-        let payload = EffectPayload::new(source, None, level);
+        let payload =
+            effect_payload_from_optional_activation_context(source, level, activation_context);
         let plan = prepare_gameplay_effect(source, cost_def, params, &payload)?;
         if !plan.is_instant() {
             return None;
@@ -419,7 +550,8 @@ fn prepare_ability_commit_plans(
     };
 
     let cooldown_plan = if let Some(cooldown_def) = ability.get_cooldown() {
-        let payload = EffectPayload::new(source, None, level);
+        let payload =
+            effect_payload_from_optional_activation_context(source, level, activation_context);
         let plan = prepare_gameplay_effect(source, cooldown_def, params, &payload)?;
         Some(plan)
     } else {
@@ -430,6 +562,32 @@ fn prepare_ability_commit_plans(
         cost_plan,
         cooldown_plan,
     })
+}
+
+fn effect_payload_from_optional_activation_context(
+    source: Entity,
+    level: u32,
+    activation_context: Option<&AbilityActivationContext>,
+) -> EffectPayload {
+    activation_context.map_or_else(
+        || EffectPayload::new(source, None, level),
+        |activation_context| {
+            effect_payload_from_activation_context(source, level, activation_context)
+        },
+    )
+}
+
+fn effect_payload_from_activation_context(
+    source: Entity,
+    level: u32,
+    activation_context: &AbilityActivationContext,
+) -> EffectPayload {
+    let payload = EffectPayload::new(source, activation_context.get_causer(), level);
+    if let Some(source_snapshot) = activation_context.get_source_snapshot() {
+        payload.with_source_snapshot(source_snapshot.clone())
+    } else {
+        payload
+    }
 }
 
 fn execute_ability_commit_plans(

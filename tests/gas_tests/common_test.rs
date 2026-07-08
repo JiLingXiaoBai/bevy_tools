@@ -11,12 +11,13 @@ use bevy_tools::gameplay_tags::{
 };
 use bevy_tools::modifiers::{Modifier, ModifierMagnitude, ModifierOperation};
 use bevy_tools::{
-    AbilityActivationQueue, AbilitySystemComponent, AbilitySystemParams,
-    ActiveGameplayEffectTargetIndex, GameplayAbilitySystemPlugin, apply_gameplay_effect,
-    cleanup_finished_abilities_system, process_ability_activation_queue_system,
-    process_gameplay_effect_application_queue_system, reconcile_active_effect_target_index_system,
-    tick_ability_tasks_system, tick_effect_duration_system, tick_effect_period_system,
-    try_activate_ability_by_handle, update_active_effect_tag_requirements_system,
+    AbilityActivationContext, AbilityActivationQueue, AbilityChainContext, AbilitySystemComponent,
+    AbilitySystemParams, ActiveGameplayEffectTargetIndex, GameplayAbilitySystemPlugin,
+    apply_gameplay_effect, cleanup_finished_abilities_system,
+    process_ability_activation_queue_system, process_gameplay_effect_application_queue_system,
+    reconcile_active_effect_target_index_system, tick_ability_tasks_system,
+    tick_effect_duration_system, tick_effect_period_system, try_activate_ability_by_handle,
+    update_active_effect_tag_requirements_system,
 };
 use std::sync::Arc;
 
@@ -145,9 +146,38 @@ pub fn activate_ability(
     target: Entity,
     handle: AbilitySpecHandle,
 ) -> bool {
+    activate_ability_result(app, source, target, handle).is_ok()
+}
+
+pub fn activate_ability_result(
+    app: &mut App,
+    source: Entity,
+    target: Entity,
+    handle: AbilitySpecHandle,
+) -> Result<(), bevy_tools::AbilityActivationError> {
     app.world_mut()
         .run_system_once(move |mut params: AbilitySystemParams| {
-            try_activate_ability_by_handle(source, target, handle, &mut params)
+            try_activate_ability_by_handle(
+                source,
+                target,
+                handle,
+                AbilityActivationContext::direct(source, AbilityChainContext::root(handle, 0)),
+                &mut params,
+            )
+        })
+        .unwrap()
+}
+
+pub fn activate_ability_with_context(
+    app: &mut App,
+    source: Entity,
+    target: Entity,
+    handle: AbilitySpecHandle,
+    context: AbilityActivationContext,
+) -> Result<(), bevy_tools::AbilityActivationError> {
+    app.world_mut()
+        .run_system_once(move |mut params: AbilitySystemParams| {
+            try_activate_ability_by_handle(source, target, handle, context.clone(), &mut params)
         })
         .unwrap()
 }
@@ -256,6 +286,7 @@ pub fn spawn_active_ability(
             handle,
             target,
             bevy_tools::AbilityActivationStatus::Active,
+            AbilityActivationContext::direct(source, AbilityChainContext::root(handle, 0)),
         ))
         .id()
 }
@@ -273,5 +304,29 @@ pub fn active_ability_count(app: &mut App) -> usize {
 pub fn ability_task_count(app: &mut App) -> usize {
     app.world_mut()
         .run_system_once(|query: Query<&AbilityTask>| query.iter().count())
+        .unwrap()
+}
+
+pub fn active_ability_entity_for_spec(app: &mut App, handle: AbilitySpecHandle) -> Option<Entity> {
+    app.world_mut()
+        .run_system_once(move |query: Query<(Entity, &ActiveGameplayAbility)>| {
+            query.iter().find_map(|(entity, ability)| {
+                (ability.get_spec_handle() == handle).then_some(entity)
+            })
+        })
+        .unwrap()
+}
+
+pub fn active_ability_context_for_spec(
+    app: &mut App,
+    handle: AbilitySpecHandle,
+) -> Option<AbilityActivationContext> {
+    app.world_mut()
+        .run_system_once(move |query: Query<&ActiveGameplayAbility>| {
+            query
+                .iter()
+                .find(|ability| ability.get_spec_handle() == handle)
+                .map(|ability| ability.get_activation_context().clone())
+        })
         .unwrap()
 }

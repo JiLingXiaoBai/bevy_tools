@@ -250,7 +250,10 @@ pub fn tick_ability_tasks_system(
             continue;
         };
 
-        if !matches!(active_ability.get_status(), AbilityActivationStatus::Active) {
+        let active_status = active_ability.get_status();
+        let active_context = active_ability.get_activation_context().clone();
+
+        if !matches!(active_status, AbilityActivationStatus::Active) {
             commands.entity(task_entity).despawn();
             continue;
         }
@@ -289,7 +292,15 @@ pub fn tick_ability_tasks_system(
                 target,
                 handle,
             } => {
-                activation_queue.push_activation(source, target, handle);
+                if let Err(err) = activation_queue.push_chained_activation(
+                    source,
+                    target,
+                    handle,
+                    task.get_active_ability(),
+                    &active_context,
+                ) {
+                    error!("failed to queue chained ability activation: {err}");
+                }
             }
             AbilityTaskOnFinished::ApplyGameplayEffect {
                 source,
@@ -297,11 +308,25 @@ pub fn tick_ability_tasks_system(
                 effect,
                 level,
             } => {
-                let payload = EffectPayload::new(source, None, level);
+                let payload =
+                    effect_payload_from_activation_context(source, level, &active_context);
                 effect_queue.push_application(target, effect, payload);
             }
         }
 
         commands.entity(task_entity).despawn();
+    }
+}
+
+fn effect_payload_from_activation_context(
+    source: Entity,
+    level: u32,
+    activation_context: &crate::gameplay_abilities::AbilityActivationContext,
+) -> EffectPayload {
+    let payload = EffectPayload::new(source, activation_context.get_causer(), level);
+    if let Some(source_snapshot) = activation_context.get_source_snapshot() {
+        payload.with_source_snapshot(source_snapshot.clone())
+    } else {
+        payload
     }
 }

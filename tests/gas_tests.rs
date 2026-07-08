@@ -1,5 +1,5 @@
-#[path = "gas_tests/common.rs"]
-mod common;
+#[path = "gas_tests/common_test.rs"]
+mod common_test;
 
 #[path = "gas_tests/active_gameplay_effect_test.rs"]
 mod active_gameplay_effect_test;
